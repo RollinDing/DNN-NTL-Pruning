@@ -125,33 +125,6 @@ def main_worker(gpu, args):
                                 weight_decay=args.weight_decay)
 
     # optionally resume from a checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            if args.gpu is None:
-                checkpoint = torch.load(args.resume)
-            else:
-                # Map model to be loaded to specified single gpu.
-                loc = 'cuda:{}'.format(args.gpu)
-                checkpoint = torch.load(args.resume, map_location=loc)
-            args.start_epoch = checkpoint['epoch']
-            args.start_state = checkpoint['state']
-            best_acc1 = checkpoint['best_acc1']
-            if_pruned = checkpoint['if_pruned']
-            ticket_init_weight = checkpoint['init_weight']
-
-            if if_pruned:
-                prune_model_custom(model.module, checkpoint['mask'], False)
-
-            model.module.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                .format(args.resume, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
-
-    cudnn.benchmark = True
-
     # Data loading code for cifar10 
     train_transform = transforms.transforms.Compose([
         transforms.transforms.RandomCrop(32, padding=4),
@@ -198,13 +171,40 @@ def main_worker(gpu, args):
         shuffle=False,
         num_workers=args.workers,
     )
-    
+
+    if args.resume:
+        if os.path.isfile(args.resume):
+            print("=> loading checkpoint '{}'".format(args.resume))
+            if args.gpu is None:
+                checkpoint = torch.load(args.resume)
+            else:
+                # Map model to be loaded to specified single gpu.
+                loc = 'cuda:{}'.format(args.gpu)
+                checkpoint = torch.load(args.resume, map_location=loc)
+            args.start_epoch = checkpoint['epoch']
+            args.start_state = checkpoint['state']
+            best_acc1 = checkpoint['best_acc1']
+            if_pruned = checkpoint['if_pruned']
+            ticket_init_weight = checkpoint['init_weight']
+
+            if if_pruned:
+                prune_model_custom(model.module, checkpoint['mask'], False)
+
+            model.module.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            print("=> loaded checkpoint '{}' (epoch {})"
+                .format(args.resume, checkpoint['epoch']))
+        else:
+            print("=> no checkpoint found at '{}', pretrain the model and save it".format(args.resume))
+            pretrain(train_loader, val_loader, model, criterion, optimizer, args)
+
+    cudnn.benchmark = True
+
     if args.evaluate:
         validate(val_loader, model, criterion, args)
         return
 
     for prun_iter in range(args.start_state, args.states):
-
         check_sparsity(model.module, False)
         for epoch in range(args.start_epoch, args.epochs):
 
@@ -268,6 +268,35 @@ def main_worker(gpu, args):
         optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                     momentum=args.momentum,
                                     weight_decay=args.weight_decay)
+
+def pretrain(train_loader, val_loader, model, criterion, optimizer, args):
+    print('pretrain the model')
+    best_acc1 = 0
+    for epoch in range(100):
+        print(optimizer.state_dict()['param_groups'][0]['lr'])
+        # train for one epoch
+        train(train_loader, model, criterion, optimizer, epoch, args)
+
+        # evaluate on validation set
+        acc1 = validate(val_loader, model, criterion, args)
+
+        # remember best acc@1 and save checkpoint
+        is_best = acc1 > best_acc1
+        best_acc1 = max(acc1, best_acc1)
+
+        if is_best:
+            best_epoch = epoch+1
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'state': 0,
+                'arch': args.arch,
+                'state_dict': model.module.state_dict(),
+                'mask': None,
+                'best_acc1': best_acc1,
+                'optimizer' : optimizer.state_dict(),
+                'if_pruned': False,
+                'init_weight':model.state_dict()
+            }, is_best, checkpoint='pretrained_models')
 
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
