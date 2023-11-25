@@ -15,6 +15,8 @@ import torch.utils.data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as models
+from torch.utils.data import Subset
+import numpy as np
 
 from pruning_utils import *
 
@@ -40,6 +42,7 @@ parser.add_argument('-b', '--batch-size', default=256, type=int,
                         'using Data Parallel or Distributed Data Parallel')
 parser.add_argument('--lr', '--learning-rate', default=1e-4, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
+parser.add_argument('--decreasing_lr', default='10,20', help='decreasing strategy')
 parser.add_argument('--save_dir', default=None, type=str)
 parser.add_argument('--percent', default=0.2, type=float, help='pruning rate for each iteration')
 parser.add_argument('--states', default=19, type=int, help='number of iterative pruning states')
@@ -56,7 +59,7 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
 parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)',
                     dest='weight_decay')
-parser.add_argument('-p', '--print-freq', default=50, type=int,
+parser.add_argument('-p', '--print-freq', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
@@ -64,8 +67,10 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training. ')
+parser.add_argument('--pretrained', default=True, type=bool, help='pretrained model path')
 parser.add_argument('--gpu', default=None, type=int,
                     help='GPU id to use.')
+
 
 
 best_acc1 = 0
@@ -109,6 +114,8 @@ def main_worker(gpu, args):
         model.fc = nn.Linear(model.fc.in_features, 10)
     elif args.arch.startswith('vgg'):
         model.classifier[6] = nn.Linear(model.classifier[6].in_features, 10)
+        model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        model.maxpool = nn.Identity()
 
     if_pruned = False
 
@@ -127,7 +134,7 @@ def main_worker(gpu, args):
     # optionally resume from a checkpoint
     # Data loading code for cifar10 
     train_transform = transforms.transforms.Compose([
-        transforms.transforms.RandomCrop(32, padding=4),
+        transforms.Resize(32),
         transforms.transforms.RandomHorizontalFlip(),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
@@ -137,6 +144,7 @@ def main_worker(gpu, args):
     ])
 
     val_transform = transforms.transforms.Compose([
+        transforms.Resize(32),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
             mean=[0.4914, 0.4822, 0.4465],
@@ -151,6 +159,14 @@ def main_worker(gpu, args):
         transform=train_transform,
     )
 
+    # Define the size of the subset
+    subset_size = 45000 # for example, 5000 samples
+
+    # Create a random subset for training
+    indices = np.random.permutation(len(train_dataset))
+    train_indices = indices[:subset_size]
+    train_subset = Subset(train_dataset, train_indices)
+
     val_dataset = datasets.CIFAR10(
         root=args.data,
         train=False,
@@ -159,7 +175,7 @@ def main_worker(gpu, args):
     )
 
     train_loader = torch.utils.data.DataLoader(
-        train_dataset,
+        train_subset,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.workers,
@@ -171,6 +187,13 @@ def main_worker(gpu, args):
         shuffle=False,
         num_workers=args.workers,
     )
+
+    pretrained_model_path = os.path.join('pretrained_models', 'cifar10-pretrain_model.pth.tar')
+    if not os.path.exists(pretrained_model_path):
+        pretrain(train_loader, val_loader, model, criterion, optimizer, args)
+    else:
+        # Load the checkpoint
+        model.load_state_dict(torch.load(pretrained_model_path))
 
     if args.resume:
         if os.path.isfile(args.resume):
@@ -196,7 +219,6 @@ def main_worker(gpu, args):
                 .format(args.resume, checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}', pretrain the model and save it".format(args.resume))
-            pretrain(train_loader, val_loader, model, criterion, optimizer, args)
 
     cudnn.benchmark = True
 
@@ -213,7 +235,7 @@ def main_worker(gpu, args):
                 acc1 = validate(val_loader, model, criterion, args)
                 best_acc1 = acc1
                 best_epoch = 0
-                # break 
+                break 
 
             print(optimizer.state_dict()['param_groups'][0]['lr'])
             # train for one epoch
@@ -234,7 +256,7 @@ def main_worker(gpu, args):
             else:
                 mask_dict = None
 
-            save_checkpoint({
+            save_checkpoint({  
                 'epoch': epoch + 1,
                 'state': prun_iter,
                 'arch': args.arch,
@@ -272,8 +294,10 @@ def main_worker(gpu, args):
 def pretrain(train_loader, val_loader, model, criterion, optimizer, args):
     print('pretrain the model')
     best_acc1 = 0
-    for epoch in range(100):
-        print(optimizer.state_dict()['param_groups'][0]['lr'])
+    decreasing_lr = list(map(int, args.decreasing_lr.split(',')))
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=decreasing_lr, gamma=0.1)
+    for epoch in range(30):
+        print('Current Learning Rate is ', optimizer.state_dict()['param_groups'][0]['lr'])
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch, args)
 
@@ -283,21 +307,11 @@ def pretrain(train_loader, val_loader, model, criterion, optimizer, args):
         # remember best acc@1 and save checkpoint
         is_best = acc1 > best_acc1
         best_acc1 = max(acc1, best_acc1)
-
         if is_best:
-            best_epoch = epoch+1
-            save_checkpoint({
-                'epoch': epoch + 1,
-                'state': 0,
-                'arch': args.arch,
-                'state_dict': model.module.state_dict(),
-                'mask': None,
-                'best_acc1': best_acc1,
-                'optimizer' : optimizer.state_dict(),
-                'if_pruned': False,
-                'init_weight':model.state_dict()
-            }, is_best, checkpoint='pretrained_models')
-
+            # save checkpoint
+            torch.save(model.state_dict(), os.path.join('pretrained_models', 'cifar10-pretrain_model.pth.tar'))
+    
+        scheduler.step()
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
     batch_time = AverageMeter('Time', ':6.3f')
