@@ -229,7 +229,6 @@ def main_worker(gpu, args):
     for prun_iter in range(args.start_state, args.states):
         check_sparsity(model.module, False)
         for epoch in range(args.start_epoch, args.epochs):
-
             if prun_iter == 0:
 
                 acc1 = validate(val_loader, model, criterion, args)
