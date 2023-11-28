@@ -22,7 +22,7 @@ def evaluate_model_transferability(args, logger, student='mnist', prun_iter=0):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     teacher_model = load_pruned_model(args, logger, prun_iter=prun_iter)
 
-    ratio = 1
+    ratio = 0.1
     if student == 'mnist':
         # Get the MNIST dataloader
         logger.info("=> loading MNIST dataset")
@@ -92,7 +92,7 @@ if __name__ == '__main__':
     logger.info("Test the pruned model's transferability")
     logger.info(args)
 
-    evaluate_model_transferability(args, logger, student='cifar100', prun_iter=0)
+    evaluate_model_transferability(args, logger, student='mnist', prun_iter=18)
 
     
     
