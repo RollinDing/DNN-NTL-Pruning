@@ -68,6 +68,70 @@ def get_cifar_dataloader(args, ratio=1.0):
 
     return train_loader, val_loader
 
+def get_usps_dataloader(args, ratio=1.0):
+    """
+    Get the USPS dataloader
+    """
+    # Data loading code for USPS 
+    train_transform = transforms.transforms.Compose([
+        transforms.Resize(32),
+        transforms.Grayscale(num_output_channels=3),
+        transforms.transforms.RandomHorizontalFlip(),
+        transforms.transforms.ToTensor(),
+        transforms.transforms.Normalize(
+            mean=[0.1307],
+            std=[0.3081],
+        ),
+    ])
+
+    val_transform = transforms.transforms.Compose([
+        transforms.Resize(32),
+        transforms.Grayscale(num_output_channels=3),
+        transforms.transforms.ToTensor(),
+        transforms.transforms.Normalize(
+            mean=[0.1307],
+            std=[0.3081],
+        ),
+    ])
+
+    train_dataset = datasets.USPS(
+        root=args.data,
+        train=True,
+        download=True,
+        transform=train_transform,
+    )
+
+    # Define the size of the subset
+    subset_size = int(7291 * ratio)# for example, 5000 samples
+
+    # Create a random subset for training
+    indices = np.random.permutation(len(train_dataset))
+    train_indices = indices[:subset_size]
+    train_subset = Subset(train_dataset, train_indices)
+
+    val_dataset = datasets.USPS(
+        root=args.data,
+        train=False,
+        download=True,
+        transform=val_transform,
+    )
+
+    train_loader = torch.utils.data.DataLoader(
+        train_subset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.workers,
+    )
+
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.workers,
+    )
+
+    return train_loader, val_loader
+
 def get_mnist_dataloader(args, ratio=1.0):
     """
     Get the MNIST dataloader
