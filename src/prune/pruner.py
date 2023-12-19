@@ -23,16 +23,44 @@ class Pruner:
         self.max_iterations = max_iterations
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
-        self.criterion = torch.nn.CrossEntropyLoss()
         self.importance_scores = self.compute_gradient_importance()
         
     def evaluate(self, data_loader):
-        # Evaluation logic here
-        pass
+        # Evaluation the model 
+        self.model.eval()
+        total = 0
+        correct = 0
+        with torch.no_grad():
+            for input, labels in data_loader:
+                input = input.to(self.device)
+                labels = labels.to(self.device)
+                outputs = self.model(input)
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+        return correct / total
 
     def fine_tune_model(self):
-        # Fine-tuning logic here
+        # Fine-tuning the model 
+        self.model.train()
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
+        criterion = torch.nn.CrossEntropyLoss()
+        for epoch in range(20):
+            for inputs, labels in self.source_loader:
+                inputs = inputs.to(self.device)
+                labels = labels.to(self.device)
+                optimizer.zero_grad()
+                outputs = self.model(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+            # for input, labels in self.target_loader:
+            #     input = input.to(self.device)
+            #     labels = labels.to(self.device)
+            #     outputs = self.model(input)
+            #     loss = self.criterion(outputs, labels)
+            #     loss.backward()
+            #     self.optimizer.step()
         pass
 
     def compute_gradient_importance(self):
@@ -48,12 +76,14 @@ class Pruner:
 
     def compute_loader_gradients(self, loader):
         total_gradients = {}
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
+        criterion = torch.nn.CrossEntropyLoss()
         for inputs, labels in loader:
             inputs = inputs.to(self.device)
             labels = labels.to(self.device)
-            self.optimizer.zero_grad()
+            optimizer.zero_grad()
             outputs = self.model(inputs)
-            loss = self.criterion(outputs, labels)
+            loss = criterion(outputs, labels)
             loss.backward()
 
             for name, param in self.model.named_parameters():
@@ -77,8 +107,11 @@ class Pruner:
         Args:
         pruning_ratio (float): The ratio of weights to prune (0.0 to 1.0).
         """
+        # Calculate importance scores
+        importance_scores = self.importance_scores
+
         # Flatten the importance scores and sort them
-        all_scores = torch.cat([scores.flatten() for scores in self.importance_scores])
+        all_scores = torch.cat([scores.flatten() for scores in importance_scores])
         threshold_idx = int(pruning_ratio * all_scores.numel())
         
         # Determine the pruning threshold
@@ -89,17 +122,18 @@ class Pruner:
         for i, (name, param) in enumerate(self.model.named_parameters()):
             if param.requires_grad:
                 # Compute mask based on the importance score threshold
-                mask = self.importance_scores[i] > threshold
+                mask = importance_scores[i] > threshold
                 mask_dict[name] = mask.float()
 
-                # Apply the mask to the weights
-                param.data.mul_(mask.float())
+                # Apply the mask to the weights and freeze pruned weights
+                with torch.no_grad():
+                    param.data.mul_(mask.float())
 
-                # Optionally, zero out the gradients of the pruned weights
-                if param.grad is not None:
-                    param.grad.data.mul_(mask.float())
+                    # Set requires_grad to False for pruned weights
+                    if torch.any(mask == 0):
+                        param.requires_grad = False
 
-        # The mask_dict contains the masks for each layer, which could be useful for analysis or debugging
+        # Return the mask dictionary, which now effectively freezes pruned weights
         return mask_dict
     
     def restore_model(self, iteration):
@@ -111,7 +145,7 @@ class Pruner:
         original_performance_target = self.evaluate(self.target_loader)
 
         for iteration in range(self.max_iterations):
-            mask = self.prune()
+            mask = self.prune(0.1)
             # TODO: the fine-tune here can be NTL?
             self.fine_tune_model()
 
@@ -126,9 +160,20 @@ class Pruner:
                 original_performance_target = current_performance_target
 
         return self.model
+    
+    def model_sparsity(self):
+        # Compute the sparsity of the model
+        total = 0
+        nonzero = 0
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                total += param.numel()
+                nonzero += torch.sum(param != 0).item()
+        return 1 - nonzero / total
 
 
 if __name__ == '__main__':
+
     # Example usage 
 
     # a model for mnist and usps 
@@ -136,12 +181,20 @@ if __name__ == '__main__':
     model.fc = torch.nn.Linear(512, 10)
 
     args = get_args()
-    mnist_trainloader, minst_testloader = get_mnist_dataloader(args, ratio=0.1)
-    usps_trainloader, usps_testloader = get_usps_dataloader(args, ratio=0.1)
+    mnist_trainloader, mnist_testloader = get_mnist_dataloader(args, ratio=0.2)
+    usps_trainloader, usps_testloader = get_usps_dataloader(args, ratio=0.2)
 
     pruner = Pruner(model, mnist_trainloader, usps_trainloader)
+    pruner.fine_tune_model()
+    print('Model sparsity:', pruner.model_sparsity())
+    print(pruner.evaluate(mnist_testloader))
+    print(pruner.evaluate(usps_testloader))
     importance_scores = pruner.compute_gradient_importance()
-    mask_dict = pruner.prune(0.1)
+    mask_dict = pruner.prune(1e-4)
+    pruner.fine_tune_model()
+    print('Model sparsity:', pruner.model_sparsity())
+    print(pruner.evaluate(mnist_testloader))
+    print(pruner.evaluate(usps_testloader))
     # visualzie the importance scores with histogram
     layer = 2
     fig, ax = plt.subplots()
