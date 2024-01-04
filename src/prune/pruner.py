@@ -57,7 +57,7 @@ class ORGPruner:
         print(f'Accuracy on source dataset: {correct / total}')
         return correct / total
 
-    def fine_tune_model(self):
+    def fine_tune_model(self, dataloader):
         # Fine-tuning the model 
         self.model.train()
 
@@ -66,7 +66,7 @@ class ORGPruner:
         criterion = torch.nn.CrossEntropyLoss()
 
         for epoch in range(self.nepochs):
-            for inputs, labels in self.dataloader:
+            for inputs, labels in dataloader:
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
                 optimizer.zero_grad()
@@ -98,8 +98,8 @@ class ORGPruner:
         gradients = self.compute_loader_gradients()
 
         # The importance scores are the gradients times the weights
-        # importance_scores = [torch.abs(gradients[name])*model_weights[i] for i, name in enumerate(gradients)]
-        importance_scores = [torch.abs(gradients[name]) for i, name in enumerate(gradients)]
+        importance_scores = [torch.abs(gradients[name])*torch.abs(model_weights[i]) for i, name in enumerate(gradients)]
+        # importance_scores = [torch.abs(gradients[name]) for i, name in enumerate(gradients)]
 
         # the importance score is the weights magnitude
         # importance_scores = [torch.abs(model_weights[i]) for i, name in enumerate(gradients)]
@@ -169,7 +169,7 @@ class ORGPruner:
         # Evaluate the model after pruning
         self.evaluate(self.dataloader)
         # Evaluate the model after fine-tuning
-        self.fine_tune_model()
+        self.fine_tune_model(self.dataloader)
         self.evaluate(self.dataloader)
         return self.mask_dict
     
@@ -386,20 +386,6 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step() 
         print(f'Epoch {epoch} loss: {loss.item()}')
-    
-    # evaluate the model on source dataset
-    model.eval()
-    total = 0
-    correct = 0
-    with torch.no_grad():
-        for input, labels in mnist_testloader:
-            input = input.to(device)
-            labels = labels.to(device)
-            outputs = model(input)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-    print(f'Accuracy on source dataset: {correct / total}')
 
     # prune the model
     for param in model.parameters():
@@ -407,10 +393,22 @@ if __name__ == '__main__':
     pruner = ORGPruner(model, mnist_trainloader)
     # model sparsity before pruning
     print('Model sparsity:', pruner.model_sparsity())
+    pruner.evaluate(mnist_testloader)
+
     # prune the model with 10% sparsity
-    mask_dict = pruner.prune(0.9)
+    mask_dict = pruner.prune(0.997)
     # model sparsity after pruning
     print('Model sparsity:', pruner.model_sparsity())
+    pruner.evaluate(mnist_testloader)
+
+    # load the target dataset
+    usps_trainloader, usps_testloader = get_usps_dataloader(args, ratio=0.1)
+
+    # finetune and evaluate the model on target dataset
+    pruner.fine_tune_model(usps_trainloader)
+    print('Model sparsity:', pruner.model_sparsity())
+    pruner.evaluate(usps_testloader)
+
     exit()
 
     usps_trainloader, usps_testloader = get_usps_dataloader(args, ratio=0.2)
