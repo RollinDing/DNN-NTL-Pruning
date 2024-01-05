@@ -196,6 +196,68 @@ def get_mnist_dataloader(args, ratio=1.0):
 
     return train_loader, val_loader
 
+def get_svhn_dataloader(args, ratio=1.0):
+    """
+    Get the SVHN dataloader
+    """
+    # Data loading code for SVHN 
+    train_transform = transforms.transforms.Compose([
+        transforms.Resize(32),
+        transforms.transforms.RandomHorizontalFlip(),
+        transforms.transforms.ToTensor(),
+        transforms.transforms.Normalize(
+            mean=[0.4377, 0.4438, 0.4728],
+            std=[0.1980, 0.2010, 0.1970],
+        ),
+    ])
+
+    val_transform = transforms.transforms.Compose([
+        transforms.Resize(32),
+        transforms.transforms.ToTensor(),
+        transforms.transforms.Normalize(
+            mean=[0.4377, 0.4438, 0.4728],
+            std=[0.1980, 0.2010, 0.1970],
+        ),
+    ])
+
+    train_dataset = datasets.SVHN(
+        root=args.data,
+        split='train',
+        download=True,
+        transform=train_transform,
+    )
+
+    # Define the size of the subset
+    subset_size = int(73257 * ratio)# for example, 5000 samples
+
+    # Create a random subset for training
+    indices = np.random.permutation(len(train_dataset))
+    train_indices = indices[:subset_size]
+    train_subset = Subset(train_dataset, train_indices)
+
+    val_dataset = datasets.SVHN(
+        root=args.data,
+        split='test',
+        download=True,
+        transform=val_transform,
+    )
+
+    train_loader = torch.utils.data.DataLoader(
+        train_subset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.workers,
+    )
+
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.workers,
+    )
+
+    return train_loader, val_loader
+
 def get_cifar100_dataloader(args, ratio=1.0):
     """
     Get the CIFAR100 dataloader
