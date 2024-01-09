@@ -319,3 +319,65 @@ def get_cifar100_dataloader(args, ratio=1.0):
     )
 
     return train_loader, val_loader
+
+def get_stl_dataloader(args, ratio=0.1):
+    """
+    Get the STL10 dataloader
+    """
+    # Data loading code for STL10 
+    train_transform = transforms.transforms.Compose([
+        transforms.Resize(32),
+        transforms.transforms.RandomHorizontalFlip(),
+        transforms.transforms.ToTensor(),
+        transforms.transforms.Normalize(
+            mean=[0.4409, 0.4279, 0.3868],
+            std=[0.2683, 0.2610, 0.2687],
+        ),
+    ])
+
+    val_transform = transforms.transforms.Compose([
+        transforms.Resize(32),
+        transforms.transforms.ToTensor(),
+        transforms.transforms.Normalize(
+            mean=[0.4409, 0.4279, 0.3868],
+            std=[0.2683, 0.2610, 0.2687],
+        ),
+    ])
+
+    train_dataset = datasets.STL10(
+        root=args.data,
+        split='train',
+        download=True,
+        transform=train_transform,
+    )
+
+    # Define the size of the subset
+    subset_size = int(5000 * ratio)# for example, 5000 samples
+
+    # Create a random subset for training
+    indices = np.random.permutation(len(train_dataset))
+    train_indices = indices[:subset_size]
+    train_subset = Subset(train_dataset, train_indices)
+
+    val_dataset = datasets.STL10(
+        root=args.data,
+        split='test',
+        download=True,
+        transform=val_transform,
+    )
+
+    train_loader = torch.utils.data.DataLoader(
+        train_subset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.workers,
+    )
+
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.workers,
+    )
+
+    return train_loader, val_loader
