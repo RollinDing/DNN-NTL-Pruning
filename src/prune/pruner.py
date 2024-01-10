@@ -11,11 +11,12 @@ import numpy as np
 import sys
 import os
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../utils')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../prune')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from args import get_args
-from data import *
+from utils.args import get_args
+from utils.data import *
+
+from models.vgg import PrunableVGG
 
 import matplotlib.pyplot as plt
 from tqdm import tqdm as tdqm
@@ -52,11 +53,7 @@ class ORGPruner:
             for input, labels in data_loader:
                 input = input.to(self.device)
                 labels = labels.to(self.device)
-                # apply the mask to the model
-                for name, param in self.model.named_parameters():
-                    if param.requires_grad:
-                        param.data.mul_(self.mask_dict[name])
-                outputs = self.model(input)
+                outputs = self.model(input, self.mask_dict)
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
@@ -76,7 +73,7 @@ class ORGPruner:
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
                 optimizer.zero_grad()
-                outputs = self.model(inputs)
+                outputs = self.model(inputs, self.mask_dict)
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
@@ -121,7 +118,7 @@ class ORGPruner:
             labels = labels.to(self.device)
 
             # Forward pass
-            outputs = self.model(inputs)
+            outputs = self.model(inputs, self.mask_dict)
             loss = criterion(outputs, labels)
 
             # Backward pass
@@ -217,18 +214,14 @@ class NTLPruner:
             for input, labels in data_loader:
                 input = input.to(self.device)
                 labels = labels.to(self.device)
-                # apply the mask to the model
-                for name, param in self.model.named_parameters():
-                    if param.requires_grad:
-                        param.data.mul_(self.mask_dict[name])
-                outputs = self.model(input)
+                outputs = self.model(input, self.mask_dict)
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
         print(f'Accuracy on dataset: {correct / total}\n')
         return correct / total
 
-    def fine_tune_model(self, dataloader, lr=1e-3):
+    def fine_tune_model(self, dataloader, nepochs=20, lr=1e-3):
         # Fine-tuning the model on both source and target dataset
         self.model.train()
 
@@ -236,34 +229,27 @@ class NTLPruner:
         optimizer = torch.optim.SGD([param for name, param in self.model.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
         criterion = torch.nn.CrossEntropyLoss()
 
-        for epoch in range(self.nepochs):
+        for epoch in range(nepochs):
             for inputs, labels in dataloader:
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
                 optimizer.zero_grad()
-                outputs = self.model(inputs)
+                outputs = self.model(inputs, self.mask_dict)
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
-
-                # Reapply the masks to keep pruned weights at zero
-                with torch.no_grad():
-                    for name, param in self.model.named_parameters():
-                        if name in self.mask_dict:
-                            mask = self.mask_dict[name]
-                            param.data.mul_(mask)
 
         # # check the model sparsity by counting the number of non-zero parameters
         # for name, param in self.model.named_parameters():
         #     if param.requires_grad:
         #         print(f'Layer {name} sparsity: {1 - torch.sum(param == 0).item() / param.numel()}')
 
-    def ntl_fine_tune_model(self, source_loader, target_loader, alpha=0.1):
+    def ntl_fine_tune_model(self, source_loader, target_loader, alpha=0.1, lr=1e-3):
         # Fine-tuning the model 
         self.model.train()
 
         # Only fine-tune the unfrozen parameters
-        optimizer = torch.optim.SGD([param for name, param in self.model.named_parameters() if param.requires_grad], lr=self.lr, momentum=0.9)
+        optimizer = torch.optim.SGD([param for name, param in self.model.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
         criterion = torch.nn.CrossEntropyLoss()
 
         for epoch in range(self.nepochs):
@@ -277,23 +263,16 @@ class NTLPruner:
 
                 optimizer.zero_grad()
                 
-                source_outputs = self.model(source_inputs)
+                source_outputs = self.model(source_inputs, self.mask_dict)
                 source_loss = criterion(source_outputs, source_labels)
 
-                target_outputs = self.model(target_inputs)
+                target_outputs = self.model(target_inputs, self.mask_dict)
                 target_loss = criterion(target_outputs, target_labels)
                 
                 differential_loss = source_loss + torch.log(1+alpha*source_loss/target_loss)
                 
                 differential_loss.backward()
                 optimizer.step()
-
-                # Reapply the masks to keep pruned weights at zero
-                with torch.no_grad():
-                    for name, param in self.model.named_parameters():
-                        if name in self.mask_dict:
-                            mask = self.mask_dict[name]
-                            param.data.mul_(mask)
 
         # # check the model sparsity by counting the number of non-zero parameters
         # for name, param in self.model.named_parameters():
@@ -312,21 +291,42 @@ class NTLPruner:
 
         # Combine the gradients from both loaders to compute importance
         # For example, importance could be higher when source gradient is high and target gradient is low
-        importance_scores_source = [torch.abs(source_gradients[name]) for i, name in enumerate(source_gradients)]
-        importance_scores_target = [torch.abs(target_gradients[name]) for i, name in enumerate(target_gradients)]
+        impact_source = [torch.abs(source_gradients[name]*model_weights[i]) for i, name in enumerate(source_gradients)]
+        impact_target = [torch.abs(target_gradients[name]*model_weights[i]) for i, name in enumerate(target_gradients)]
 
         # standardize two importance scores
-        importance_scores_source_std = [(scores-torch.min(scores))/(torch.max(scores)-torch.min(scores)) for scores in importance_scores_source]
-        importance_scores_target_std = [(scores-torch.min(scores))/(torch.max(scores)-torch.min(scores)) for scores in importance_scores_target]
+        impact_source_std = [(scores-torch.min(scores))/(torch.max(scores)-torch.min(scores)) for scores in impact_source]
+        impact_target_std = [(scores-torch.min(scores))/(torch.max(scores)-torch.min(scores)) for scores in impact_target]
+
+        # min_impact_source = torch.min(torch.cat([scores.flatten() for scores in impact_source]))
+        # max_impact_source = torch.max(torch.cat([scores.flatten() for scores in impact_source]))
+        # min_impact_target = torch.min(torch.cat([scores.flatten() for scores in impact_target]))
+        # max_impact_target = torch.max(torch.cat([scores.flatten() for scores in impact_target]))
+
+        # impact_source_std = [(scores-min_impact_source)/(max_impact_source-min_impact_source) for scores in impact_source]
+        # impact_target_std = [(scores-min_impact_target)/(max_impact_target-min_impact_target) for scores in impact_target]
 
         # TODO: how to design the importance score?
         # importance_scores = [importance_scores_source[i]*torch.log(1+importance_scores_source_std[i]/(importance_scores_target_std[i]+1e-6)) for i in range(len(importance_scores_source))]
-        importance_scores = [importance_scores_source_std[i]/(importance_scores_target_std[i]+1e-6) for i in range(len(importance_scores_source))]
+        # importance_scores = [impact_source_std[i]/(impact_target_std[i]+1e-12) for i in range(len(impact_target))]
         # importance_scores = [importance_scores_source[i] + torch.log(1+importance_scores_source[i]/importance_scores_target[i]) for i in range(len(importance_scores_source))]
-        return importance_scores
+        
 
+        # The importance score is defined as the importance score on the target dataset
+        epsilon = 1e-6
+
+        # print the number of impact_source which smaller than epsilon
+        # print(torch.sum(torch.cat([scores.flatten() for scores in impact_source]) < epsilon)/len(torch.cat([scores.flatten() for scores in impact_source])))
+
+        # importance_scores = [torch.where(impact_source[i] < epsilon, 
+        #                                  impact_target[i], 
+        #                                  1e-15*torch.ones_like(model_weights[i])) for i in range(len(impact_source))]
+
+        importance_scores = [impact_target[i]-impact_source[i] for i in range(len(impact_target))]
+        return importance_scores
     
     def compute_loader_gradients(self, dataloader):
+        # Consider using the NTL loss for finding the importance gradient
         gradients = {name: torch.zeros_like(param) for name, param in self.model.named_parameters() if param.requires_grad}
         criterion = torch.nn.CrossEntropyLoss()
         
@@ -336,7 +336,7 @@ class NTLPruner:
             labels = labels.to(self.device)
 
             # Forward pass
-            outputs = self.model(inputs)
+            outputs = self.model(inputs, self.mask_dict)
             loss = criterion(outputs, labels)
 
             # Backward pass
@@ -347,15 +347,57 @@ class NTLPruner:
             for name, param in self.model.named_parameters():
                 if param.requires_grad and param.grad is not None:
                     # Due to cross-entropy loss, the last layer will not have gradients
-                    gradients[name] += param.grad
-
-        # Average gradients over the dataset
-        num_batches = len(dataloader)
-        for name in gradients:
-            gradients[name] /= num_batches
+                    # The absolute value of the gradients and the ones that are in the masks should be zero out
+                    gradients[name] += (torch.abs(param.grad)+1e-12)*self.mask_dict[name]
 
         return gradients
+
+    def compute_ntl_gradients_importance(self):
+        """
+        The importance score is not correct here --> we are going to find the important score to the source domain but the not for the target domain,
+        The design of the score should be based on two SEPERATE loss function --> rather than one.
+        """
+        self.model.train()
+        model_weights = [param for name, param in self.model.named_parameters() if param.requires_grad]
+        ntl_gradients = self.compute_ntl_gradients()
+
+        # The importance scores are the gradients times the weights
+        importance_scores = [torch.abs(ntl_gradients[name]*model_weights[i]) for i, name in enumerate(ntl_gradients)]
+
+        return importance_scores  
     
+    def compute_ntl_gradients(self, alpha=1e4):
+        # Consider using the NTL loss for finding the importance gradient
+        gradients = {name: torch.zeros_like(param) for name, param in self.model.named_parameters() if param.requires_grad}
+        criterion = torch.nn.CrossEntropyLoss()
+        
+        self.model.train()
+        for (source_inputs, source_labels), (target_inputs, target_labels) in zip(self.source_loader, self.target_loader):
+            source_inputs = source_inputs.to(self.device)
+            source_labels = source_labels.to(self.device)
+            source_outputs = self.model(source_inputs, self.mask_dict)
+            source_loss = criterion(source_outputs, source_labels)
+
+            target_inputs = target_inputs.to(self.device)
+            target_labels = target_labels.to(self.device)
+            target_outputs = self.model(target_inputs, self.mask_dict)
+            target_loss = criterion(target_outputs, target_labels)
+
+            total_loss = source_loss - target_loss
+
+            # Backward pass
+            self.model.zero_grad()  # Reset gradients to zero
+            total_loss.backward()
+
+            # Accumulate gradients
+            for name, param in self.model.named_parameters():
+                if param.requires_grad and param.grad is not None:
+                    # Due to cross-entropy loss, the last layer will not have gradients
+                    # The absolute value of the gradients and the ones that are in the masks should be zero out
+                    gradients[name] += (torch.abs(param.grad)+1e-12)*self.mask_dict[name]
+
+        return gradients
+
     def prune(self, pruning_ratio):
         """
         Prune the model based on the calculated importance scores.
@@ -365,7 +407,8 @@ class NTLPruner:
         """
         print('Pruning the model with pruning ratio:', pruning_ratio)
         # Calculate importance scores
-        importance_scores = self.compute_gradient_importance()
+        # importance_scores = self.compute_gradient_importance()
+        importance_scores = self.compute_ntl_gradients_importance()
 
         # Flatten the importance scores and sort them
         all_scores = torch.cat([scores.flatten() for scores in importance_scores])
@@ -421,39 +464,45 @@ class NTLPruner:
             print(f'\nIteration {iteration + 1}/{iterations}')
 
             # Calculate importance scores
-            importance_scores = self.compute_gradient_importance()
-
-            # Apply existing masks to the importance scores
-            for i, (name, param) in enumerate(self.model.named_parameters()):
-                if name in self.mask_dict:
-                    importance_scores[i].mul_(self.mask_dict[name])
-
+            # importance_scores = self.compute_gradient_importance()
+            importance_scores = self.compute_ntl_gradients_importance()
+            
             # Flatten the importance scores and select those are not pruned
             all_scores = torch.cat([scores.flatten() for scores in importance_scores])
+            # To verify count the number of 0 in all scores
+            print("Number of zero in the importance score", torch.sum(all_scores == 0)/len(all_scores))
+
             all_scores = all_scores[all_scores != 0]
+            all_scores = all_scores[~torch.isnan(all_scores)]
+            # all_scores = all_scores[all_scores < 1]
             threshold_idx = int(pruning_ratio*all_scores.numel())
 
             # Determine the pruning threshold
             threshold, _ = torch.kthvalue(all_scores, threshold_idx)
-            print(f'\nThreshold: {threshold} \n')
-
+            print(f'\nThreshold: {threshold}')
+            # if threshold >=1:
+            #     print("Reaching the limit!!\n")
+            #     break
             # Apply the threshold to the importance scores and create a mask
             for i, (name, param) in enumerate(self.model.named_parameters()):
                 if param.requires_grad and param.grad is not None:
                     # Compute mask based on the importance score threshold
                     mask = importance_scores[i] > threshold
-                    self.mask_dict[name] = mask.float()
-                    print(f'Layer {i} sparsity: {1 - torch.sum(mask).item() / mask.numel()}')
-
+                    # mask += importance_scores[i] == 1
+                    self.mask_dict[name] *= mask.float()
+                    # print(f'Layer {i} sparsity: {1 - torch.sum(self.mask_dict[name]).item() / mask.numel()}')
                     # Apply the mask to the weights and freeze pruned weights
                     with torch.no_grad():
                         param.data.mul_(mask.float())
+        
+                    
 
             # Return the mask dictionary, which now effectively freezes pruned weights
         
             # Evaluate the model after pruning
             print("\n")
             print("Before fine-tuning")
+            print("Model Sparsity: {0}".format(self.model_sparsity()))
             print(f'Evaluate on source loader')
             self.evaluate(self.source_loader)
             print(f'Evaluate on target loader')
@@ -461,16 +510,21 @@ class NTLPruner:
 
             # Evaluate the model after fine-tuning
             # combine the source and target dataset to fine-tune the model at the ratio of 10:1
-            target_ratio = 0.1
+            target_ratio = 0.05
             source_dataset = self.source_loader.dataset
-            
             target_dataset = self.target_loader.dataset
+
+            subset_size = int(len(source_dataset) * target_ratio)
+            indices = np.random.permutation(len(source_dataset))
+            source_indices = indices[:subset_size]
+            source_subset = Subset(source_dataset, source_indices)
+
             subset_size = int(len(target_dataset) * target_ratio)
             indices = np.random.permutation(len(target_dataset))
             target_indices = indices[:subset_size]
             target_subset = Subset(target_dataset, target_indices)
 
-            finetune_dataset = torch.utils.data.ConcatDataset([source_dataset, target_subset])
+            finetune_dataset = torch.utils.data.ConcatDataset([source_subset, target_subset])
             finetune_dataloader = torch.utils.data.DataLoader(
                 finetune_dataset,
                 batch_size=32,
@@ -478,7 +532,7 @@ class NTLPruner:
                 num_workers=4,
             )
 
-            self.ntl_fine_tune_model(self.source_loader, self.target_loader, alpha=10)
+            self.ntl_fine_tune_model(self.source_loader, self.target_loader, alpha=10, lr=1e-4)
 
             print("After NTL fine-tuning")
             print(f'Evaluate on source loader')
@@ -488,7 +542,6 @@ class NTLPruner:
 
             self.fine_tune_model(finetune_dataloader, lr=1e-4)
             
-
             print("After fine-tuning")
             print(f'Evaluate on source loader')
             self.evaluate(self.source_loader)
@@ -549,13 +602,13 @@ if __name__ == '__main__':
     args = get_args()
 
     # Load the source dataset
-    # mnist_trainloader, mnist_testloader = get_mnist_dataloader(args, ratio=0.1)
-    mnist_trainloader, mnist_testloader = get_cifar_dataloader(args, ratio=0.1)
+    mnist_trainloader, mnist_testloader = get_mnist_dataloader(args, ratio=0.1)
+    # mnist_trainloader, mnist_testloader = get_cifar_dataloader(args, ratio=0.1)
 
     # finetune the model on source dataset 
     print('Finetune the model on source dataset')
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    nepochs = 50
+    nepochs = 20
     model.to(device)    
     model.train()
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3, momentum=0.9)
@@ -575,14 +628,17 @@ if __name__ == '__main__':
     # prune the model
     for param in model.parameters():
         param.requires_grad = True
+    
+    # build the prunable model
+    model2prune = PrunableVGG(model)
 
-    # pruner = ORGPruner(model, mnist_trainloader)
+    # pruner = ORGPruner(model2prune, mnist_trainloader)
     # # model sparsity before pruning
     # print('Model sparsity:', pruner.model_sparsity())
     # pruner.evaluate(mnist_testloader)
 
     # # prune the model with 10% sparsity
-    # mask_dict = pruner.prune(0.997)
+    # mask_dict = pruner.prune(0.99)
     # # model sparsity after pruning
     # print('Model sparsity:', pruner.model_sparsity())
     # pruner.evaluate(mnist_testloader)
@@ -595,20 +651,19 @@ if __name__ == '__main__':
     # print('Model sparsity:', pruner.model_sparsity())
     # pruner.evaluate(usps_testloader)
 
-
     # NTL pruning
     usps_trainloader, usps_testloader = get_usps_dataloader(args, ratio=0.1)
     # usps_trainloader, usps_testloader = get_svhn_dataloader(args, ratio=0.1)
     # usps_trainloader, usps_testloader = get_stl_dataloader(args, ratio=0.1)
 
-    pruner = NTLPruner(model, mnist_trainloader, usps_trainloader)
+    pruner = NTLPruner(model2prune, mnist_trainloader, usps_trainloader)
     # model sparsity before pruning
     print('Model sparsity:', pruner.model_sparsity())
     pruner.evaluate(mnist_testloader)
 
     # prune the model with 20% sparsity
-    mask_dict = pruner.iterative_prune(0.1, iterations=10)
-    pruner.ntl_fine_tune_model(mnist_trainloader, usps_trainloader, alpha=100)
+    mask_dict = pruner.iterative_prune(0.1, iterations=40)
+    pruner.ntl_fine_tune_model(mnist_trainloader, usps_trainloader, alpha=100, lr=1e-4)
     print("After NTL fine-tuning on the target dataset")
     # model sparsity after pruning
     print('Model sparsity:', pruner.model_sparsity())
