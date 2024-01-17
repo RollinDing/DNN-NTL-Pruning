@@ -159,8 +159,9 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-data/
+data
 pretrained_models/
 cifar10_imp/
 logs/
 imgs/
+base_models/
