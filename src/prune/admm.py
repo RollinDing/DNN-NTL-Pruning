@@ -7,9 +7,9 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torchvision
 
-from copy import deepcopy
 import logging
-
+import time
+from copy import deepcopy
 import numpy as np
 import sys
 import os
@@ -22,11 +22,12 @@ from utils.args import get_args
 from utils.data import *
 
 class ADMMPruner:
-    def __init__(self, model, source_loader, target_loader, prune_percentage=0.1, source_perf_threshold=0.9, max_iterations=30):    
+    def __init__(self, model, source_loader, target_loader, args, prune_percentage=0.1, source_perf_threshold=0.9, max_iterations=30):    
         self.source_loader = source_loader
         self.target_loader = target_loader
-        self.nepochs = 1
-        self.lr = 1e-4
+        self.args = args
+        self.nepochs = args.epochs
+        self.lr = args.lr
         self.prune_percentage = prune_percentage
         self.source_perf_threshold = source_perf_threshold
         self.max_iterations = max_iterations
@@ -51,7 +52,7 @@ class ADMMPruner:
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
-        print(f'Accuracy on dataset: {correct / total}\n')
+        # print(f'Accuracy on dataset: {correct / total}\n')
         return correct / total
 
     def finetune_model(self, dataloader, nepochs=30, lr=1e-3):
@@ -139,8 +140,8 @@ class ADMMPruner:
         # Initialize the loss function
         criterion = nn.CrossEntropyLoss()
         # Initialize the rho
-        rho = 1e-3
-        alpha = 1e-4
+        rho = self.args.rho
+        alpha = self.args.alpha
         # Initialize the Z and U variables
         Z_dict, U_dict = self.initialize_Z_and_U()
         # Run the ADMM iterations
@@ -185,7 +186,7 @@ class ADMMPruner:
                     admm_loss_sum += rho/2 * admm_reg.item()
                     sample_num += source_input.size(0)
                 # Print the admm loss
-                print(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}')
+                logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}')
                 
             # Update the Z variables
             l1_alpha = 1e-4
@@ -199,26 +200,41 @@ class ADMMPruner:
             # Evaluate the model
             source_perf = self.evaluate(self.source_loader)
             target_perf = self.evaluate(self.target_loader)
-            print(f'Iteration {iteration}: source perf: {source_perf}, target perf: {target_perf}, model sparsity: {self.model_sparsity()}')
+            logging.info(f'Iteration {iteration}: source perf: {source_perf}, target perf: {target_perf}, model sparsity: {self.model_sparsity()}')
 
 
 def main():
-    # Load the pretrained model 
-    model = torchvision.models.vgg11(pretrained=True)
-    # change the output layer to 10 classes (for digits dataset)
-    model.fc = nn.Sequential(
-        nn.Linear(512, 512),
-        nn.ReLU(inplace=True),
-        nn.Dropout(0.5),
-        nn.Linear(512, 10),
-    )
-
     # load args 
     args = get_args()
 
-    source_domain = 'usps'
-    target_domain = 'mnist'
-    finetune_ratio = 0.1
+    if args.arch == 'vgg11':
+        # Load the pretrained model 
+        model = torchvision.models.vgg11(pretrained=True)
+        # change the output layer to 10 classes (for digits dataset)
+        model.fc = nn.Sequential(
+            nn.Linear(512, 512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(512, 10),
+        )
+
+
+    source_domain = args.source
+    target_domain = args.target
+    finetune_ratio = args.finetune_ratio
+
+    # Create the logger 
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', 'logs')
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}.log')
+    logging.basicConfig(filename=log_path, level=logging.INFO)
+    # Log the time 
+    logging.info(time.asctime(time.localtime(time.time())))
+    # Log the args
+    logging.info(args)
+    # Log the source and target domain
+    logging.info(f'ADMM: {source_domain} to {target_domain}')
 
     # Load the source dataset
     if source_domain == 'mnist':
@@ -231,6 +247,8 @@ def main():
         source_trainloader, source_testloader = get_svhn_dataloader(args, ratio=finetune_ratio)
     elif source_domain == 'mnistm':
         source_trainloader, source_testloader = get_mnistm_dataloader(args, ratio=finetune_ratio)
+    elif source_domain == 'syn':
+        source_trainloader, source_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
 
     model = load_base_model(model, 'vgg11', source_domain, source_trainloader, source_testloader)
 
@@ -248,19 +266,23 @@ def main():
         target_trainloader, target_testloader = get_svhn_dataloader(args, ratio=finetune_ratio)
     elif target_domain == 'mnistm':
         target_trainloader, target_testloader = get_mnistm_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'syn':
+        target_trainloader, target_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
     
     modelcopy = deepcopy(model2prune)
-    admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader)
-    print("Evaluate the model before ADMM")
-    print("The model performance on source domain")
+    admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader, args)
+    logging.info("Evaluate the model before ADMM")
+    logging.info("The model performance on source domain")
     admm_copy.finetune_model(source_trainloader, lr=1e-4, nepochs=50)
-    admm_copy.evaluate(source_testloader)
+    source_accuracy = admm_copy.evaluate(source_testloader)
+    logging.info(f"Source accuracy: {source_accuracy}")
     admm_copy.finetune_model(target_trainloader, lr=1e-4, nepochs=50)
-    print("The model performance on target domain")
-    admm_copy.evaluate(target_testloader)
+    logging.info("The model performance on target domain")
+    target_accuracy = admm_copy.evaluate(target_testloader)
+    logging.info(f"Target accuracy: {target_accuracy}")
 
     # Initialize the ADMM pruner
-    admm_pruner = ADMMPruner(model2prune, source_trainloader, target_trainloader)
+    admm_pruner = ADMMPruner(model2prune, source_trainloader, target_trainloader, args)
     # Evaluate the model
     # admm_pruner.evaluate(source_testloader)
     # admm_pruner.evaluate(target_testloader)
@@ -270,16 +292,21 @@ def main():
 
     # Fine-tune the model 
     # The model sparsity
-    print(f"Model Sparsity: {admm_pruner.model_sparsity()}")
-    print("Before Fine-tune the model")
-    print("Evaluate one the source domain")
-    admm_pruner.evaluate(source_testloader)
-    print("Evaluate on the target domain")
-    admm_pruner.evaluate(target_testloader)
-    print("Fine-tune the model")
+    logging.info(f"Model Sparsity: {admm_pruner.model_sparsity()}")
+    logging.info("Before Fine-tune the model")
+    logging.info("Evaluate one the source domain")
+    source_accuracy = admm_pruner.evaluate(source_testloader)
+    logging.info(f"Source accuracy: {source_accuracy}")
+
+    logging.info("Evaluate on the target domain")
+    target_accuracy = admm_pruner.evaluate(target_testloader)
+    logging.info(f"Target accuracy: {target_accuracy}")
+
+    logging.info("Fine-tune the model")
     admm_pruner.finetune_model(target_trainloader, lr=1e-4, nepochs=50)
-    print("Evaluate on the target domain")
-    admm_pruner.evaluate(target_testloader)
+    logging.info("Evaluate on the target domain")
+    target_accuracy = admm_pruner.evaluate(target_testloader)
+    logging.info(f"Target accuracy: {target_accuracy}")
     pass
 
 

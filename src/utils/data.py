@@ -7,6 +7,7 @@ from torch.utils.data import Subset
 import numpy as np
 
 from .mnistm import MNISTM
+from .syn import SyntheticDigits
 
 def get_cifar_dataloader(args, ratio=1.0):
     """
@@ -322,6 +323,63 @@ def get_mnistm_dataloader(args, ratio=1.0):
 
     return train_loader, val_loader
 
+def get_syn_dataloader(args, ratio=1.0):
+    """
+    Get the Synthetic Digits dataloader
+    """
+    # Data loading code for Synthetic Digits 
+    train_transform = transforms.transforms.Compose([
+        transforms.Resize(32),
+        transforms.transforms.RandomHorizontalFlip(),
+        transforms.transforms.ToTensor(),
+    ])
+
+    val_transform = transforms.transforms.Compose([
+        transforms.Resize(32),
+        transforms.transforms.ToTensor(),
+    ])
+
+    train_dataset = SyntheticDigits(
+        root=args.data,
+        train=True,
+        download=True,
+        transform=train_transform,
+    )
+
+    # Define the size of the subset
+    subset_size = int(60000 * ratio)# for example, 5000 samples
+
+    # Create a random subset for training
+    indices = np.random.permutation(60000)
+    train_indices = indices[:subset_size]
+    train_subset = Subset(train_dataset, train_indices)
+
+    val_dataset = SyntheticDigits(
+        root=args.data,
+        train=False,
+        download=True,
+        transform=val_transform,
+    )
+
+    train_loader = torch.utils.data.DataLoader(
+        train_subset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.workers,
+        drop_last=True,
+    )
+
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.workers,
+        drop_last=True,
+    )
+
+    return train_loader, val_loader
+
+
 def get_cifar100_dataloader(args, ratio=1.0):
     """
     Get the CIFAR100 dataloader
@@ -445,4 +503,3 @@ def get_stl_dataloader(args, ratio=0.1):
     )
 
     return train_loader, val_loader
-

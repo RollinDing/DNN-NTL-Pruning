@@ -10,11 +10,20 @@ def get_args():
     ############################# required settings ################################
     parser.add_argument('data', metavar='DIR',
                         help='path to dataset')
-    parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50',
+    parser.add_argument('-a', '--arch', metavar='ARCH', default='vgg11',
                         choices=model_names,
                         help='model architecture: ' +
                             ' | '.join(model_names) +
                             ' (default: resnet50)')
+    parser.add_argument('--source', choices=['mnist', 'svhn', 'usps', 'mnistm', 'syn', 'cifar10', 'cifar100'], 
+                        default='mnist', 
+                        help='source dataset')
+    parser.add_argument('--target', choices=['mnist', 'svhn', 'usps', 'mnistm', 'syn', 'cifar10', 'cifar100'],
+                        default='usps', 
+                        help='target dataset')
+    parser.add_argument('--finetune-ratio', default=0.1, type=float, help='finetune ratio')
+    parser.add_argument('--rho', default=1e-2, type=float, help='rho of admm')
+    parser.add_argument('--alpha', default=1e-3, type=float, help='alpha of admm')
     parser.add_argument('--epochs', default=10, type=int, metavar='N',
                         help='number of total epochs to run')
     parser.add_argument('-b', '--batch-size', default=256, type=int,
@@ -24,6 +33,7 @@ def get_args():
                             'using Data Parallel or Distributed Data Parallel')
     parser.add_argument('--lr', '--learning-rate', default=1e-4, type=float,
                         metavar='LR', help='initial learning rate', dest='lr')
+    
     parser.add_argument('--decreasing_lr', default='10,20', help='decreasing strategy')
     parser.add_argument('--save_dir', default=None, type=str)
     parser.add_argument('--percent', default=0.2, type=float, help='pruning rate for each iteration')
