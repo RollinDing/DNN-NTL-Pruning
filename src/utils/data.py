@@ -379,7 +379,6 @@ def get_syn_dataloader(args, ratio=1.0):
 
     return train_loader, val_loader
 
-
 def get_cifar100_dataloader(args, ratio=1.0):
     """
     Get the CIFAR100 dataloader

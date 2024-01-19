@@ -249,6 +249,8 @@ def main():
         source_trainloader, source_testloader = get_mnistm_dataloader(args, ratio=finetune_ratio)
     elif source_domain == 'syn':
         source_trainloader, source_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
+    elif source_domain == 'stl':
+        source_trainloader, source_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
 
     model = load_base_model(model, 'vgg11', source_domain, source_trainloader, source_testloader)
 
@@ -268,6 +270,8 @@ def main():
         target_trainloader, target_testloader = get_mnistm_dataloader(args, ratio=finetune_ratio)
     elif target_domain == 'syn':
         target_trainloader, target_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'stl':
+        target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
     
     modelcopy = deepcopy(model2prune)
     admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader, args)
