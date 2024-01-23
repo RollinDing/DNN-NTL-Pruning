@@ -671,7 +671,6 @@ def evaluate_original_transferability(model2prune, source_trainloader, source_te
     print("After fine-tuning on the target dataset")
     pruner.evaluate(target_testloader)
 
-
 if __name__ == '__main__':
     # Example usage 
 
