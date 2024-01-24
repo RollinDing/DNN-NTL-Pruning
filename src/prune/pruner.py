@@ -673,7 +673,6 @@ def evaluate_original_transferability(model2prune, source_trainloader, source_te
 
 if __name__ == '__main__':
     # Example usage 
-
     # Set the random seed for reproducible experiments
     torch.manual_seed(1234)
     np.random.seed(1234)
