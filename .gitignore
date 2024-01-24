@@ -165,3 +165,4 @@ cifar10_imp/
 logs/
 imgs/
 base_models/
+saved_models/

@@ -9,6 +9,7 @@ import torchvision
 
 import logging
 import time
+import pickle
 from copy import deepcopy
 import numpy as np
 import sys
@@ -17,12 +18,12 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.vgg import PrunableVGG
 
-from pruner import load_base_model
+from prune.pruner import load_base_model
 from utils.args import get_args
 from utils.data import *
 
 class ADMMPruner:
-    def __init__(self, model, source_loader, target_loader, args, prune_percentage=0.1, source_perf_threshold=0.9, max_iterations=30):    
+    def __init__(self, model, source_loader, target_loader, args, prune_percentage=0.9, source_perf_threshold=0.9, max_iterations=30):    
         self.source_loader = source_loader
         self.target_loader = target_loader
         self.args = args
@@ -64,6 +65,8 @@ class ADMMPruner:
         criterion = torch.nn.CrossEntropyLoss()
 
         for epoch in range(nepochs):
+            total_loss = 0.0
+            count = 0
             for inputs, labels in dataloader:
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
@@ -71,7 +74,10 @@ class ADMMPruner:
                 outputs = self.model(inputs, self.mask_dict)
                 loss = criterion(outputs, labels)
                 loss.backward()
+                total_loss += loss.item()
+                count += len(labels)
                 optimizer.step()
+            print(f"Epoch {epoch}: {total_loss/count}")
 
     def model_sparsity(self):
         # Compute the sparsity of the model considering the pruning masks
@@ -187,6 +193,11 @@ class ADMMPruner:
                     sample_num += source_input.size(0)
                 # Print the admm loss
                 logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}')
+
+                # Check the model sparsity for each epoch as stop criterion
+                sparsity = self.model_sparsity()
+                if sparsity > self.prune_percentage:
+                    break
                 
             # Update the Z variables
             l1_alpha = 1e-4
@@ -202,23 +213,63 @@ class ADMMPruner:
             target_perf = self.evaluate(self.target_loader)
             logging.info(f'Iteration {iteration}: source perf: {source_perf}, target perf: {target_perf}, model sparsity: {self.model_sparsity()}')
 
+def evaluate_sparse_model(model, mask_dict, trainloader, testloader, nepochs=30, lr=0.001):
+    # Fine-tune the model using trainloader
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.train()
+    # Only fine-tune the unfrozen parameters
+    optimizer = torch.optim.SGD([param for name, param in model.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
+    criterion = torch.nn.CrossEntropyLoss()
+
+    for epoch in range(nepochs):
+        total_loss = 0.0
+        count = 0
+        for inputs, labels in trainloader:
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            optimizer.zero_grad()
+            outputs = model(inputs, mask_dict)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            total_loss += loss.item()
+            count += len(labels)
+            optimizer.step()
+        logging.info(f"Epoch {epoch}: {total_loss/count}")
+    
+    # Evaluate the model using testloader
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, labels in testloader:
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            outputs = model(inputs, mask_dict)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    # logging.info(f"Evaluate Accuracy: {correct/total}")
+    return correct/total
 
 def main():
     # load args 
     args = get_args()
-
+    num_classes = 10
     if args.arch == 'vgg11':
         # Load the pretrained model 
         model = torchvision.models.vgg11(pretrained=True)
         # change the output layer to 10 classes (for digits dataset)
-        model.fc = nn.Sequential(
-            nn.Linear(512, 512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(512, 10),
+        model.classifier = nn.Sequential(
+            nn.Linear(512 * 7 * 7, 4096),
+            nn.ReLU(True),
+            nn.Dropout(p=0.5),
+            nn.Linear(4096, 4096),
+            nn.ReLU(True),
+            nn.Dropout(p=0.5),
+            nn.Linear(4096, num_classes),
         )
-
-
     source_domain = args.source
     target_domain = args.target
     finetune_ratio = args.finetune_ratio
@@ -274,7 +325,7 @@ def main():
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
     
     modelcopy = deepcopy(model2prune)
-    admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader, args)
+    admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=0.98)
     logging.info("Evaluate the model before ADMM")
     logging.info("The model performance on source domain")
     admm_copy.finetune_model(source_trainloader, lr=1e-4, nepochs=50)
@@ -286,7 +337,7 @@ def main():
     logging.info(f"Target accuracy: {target_accuracy}")
 
     # Initialize the ADMM pruner
-    admm_pruner = ADMMPruner(model2prune, source_trainloader, target_trainloader, args)
+    admm_pruner = ADMMPruner(model2prune, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=0.98)
     # Evaluate the model
     # admm_pruner.evaluate(source_testloader)
     # admm_pruner.evaluate(target_testloader)
@@ -294,23 +345,37 @@ def main():
     # Run the ADMM algorithm
     admm_pruner.run_admm()
 
+    # save the ADMM pruner as a pickle file
+    with open(f'saved_models/{source_domain}_to_{target_domain}/admm_pruner.pkl', 'wb') as f:
+        pickle.dump(admm_pruner, f)
+
+    # Save the pruned model and masks
+    torch.save(admm_pruner.model, f'saved_models/{source_domain}_to_{target_domain}/admm_model.pth')
+    torch.save(admm_pruner.mask_dict, f'saved_models/{source_domain}_to_{target_domain}/admm_mask.pth')
+
     # Fine-tune the model 
     # The model sparsity
     logging.info(f"Model Sparsity: {admm_pruner.model_sparsity()}")
     logging.info("Before Fine-tune the model")
-    logging.info("Evaluate one the source domain")
-    source_accuracy = admm_pruner.evaluate(source_testloader)
+    print("Evaluate one the source domain")
+    model = admm_pruner.model
+    mask_dict = admm_pruner.mask_dict
+    source_model = deepcopy(model)
+    source_accuracy = evaluate_sparse_model(source_model, mask_dict, source_trainloader, source_testloader, nepochs=50, lr=1e-4)
+    # Save the finetuned source model
+    torch.save(source_model, f'saved_models/{source_domain}_to_{target_domain}/admm_source_model.pth')
+
     logging.info(f"Source accuracy: {source_accuracy}")
 
     logging.info("Evaluate on the target domain")
-    target_accuracy = admm_pruner.evaluate(target_testloader)
+    target_model = deepcopy(model)
+    evaluate_sparse_model(target_model, mask_dict, target_trainloader, target_testloader, nepochs=50, lr=1e-4)
+
+    # Save the finetuned target model
+    target_accuracy = torch.save(target_model, f'saved_models/{source_domain}_to_{target_domain}/admm_target_model.pth')
     logging.info(f"Target accuracy: {target_accuracy}")
 
-    logging.info("Fine-tune the model")
-    admm_pruner.finetune_model(target_trainloader, lr=1e-4, nepochs=50)
-    logging.info("Evaluate on the target domain")
-    target_accuracy = admm_pruner.evaluate(target_testloader)
-    logging.info(f"Target accuracy: {target_accuracy}")
+
     pass
 
 

@@ -676,17 +676,19 @@ if __name__ == '__main__':
     # Set the random seed for reproducible experiments
     torch.manual_seed(1234)
     np.random.seed(1234)
-
+    num_classes = 10
     # import the pretrained torchvision model 
     model = torchvision.models.vgg11(pretrained=True)
     # change the output layer to 10 classes (for digits dataset)
-    model.fc = nn.Sequential(
-        nn.Linear(512, 512),
-        nn.ReLU(inplace=True),
-        nn.Dropout(0.5),
-        nn.Linear(512, 10),
+    model.classifier = nn.Sequential(
+        nn.Linear(512 * 7 * 7, 4096),
+        nn.ReLU(True),
+        nn.Dropout(p=0.5),
+        nn.Linear(4096, 4096),
+        nn.ReLU(True),
+        nn.Dropout(p=0.5),
+        nn.Linear(4096, num_classes),
     )
-
     # load args 
     args = get_args()
     
