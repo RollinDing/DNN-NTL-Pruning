@@ -44,7 +44,8 @@ def load_dataset(args, domain, finetune_ratio):
 
 def finetune_sparse_model(model, mask_dict, trainloader, testloader, nepochs=50, lr=0.001):
     # Only fine-tune the unfrozen parameters
-    optimizer = torch.optim.SGD([param for name, param in model.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
+    # optimizer = torch.optim.SGD([param for name, param in model.named_parameters() if param.requires_grad], lr=lr, mask_dictmomentum=0.9)
+    optimizer = torch.optim.Adam([param for name, param in model.named_parameters() if param.requires_grad], lr=lr)
     criterion = torch.nn.CrossEntropyLoss()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -63,6 +64,14 @@ def finetune_sparse_model(model, mask_dict, trainloader, testloader, nepochs=50,
             count += len(labels)
             optimizer.step()
         print(f"Epoch {epoch}: {total_loss/count}")
+        # how many percentage parameters are adjusted 
+        # changed = 0
+        # total = 0
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         changed += torch.sum(param.grad != 0).item()
+        #         total += param.numel()
+        # print(f"Percentage of changed parameters: {changed/total}")
 
 def evaluate_sparse_model(model, mask_dict, testloader):
     # Fine-tune the model using trainloader
@@ -249,8 +258,8 @@ def main():
         # Evaluate the transferability 
         model_copy = deepcopy(target_model)    
 
-        finetune_sparse_model(model_copy, mask_dict, subtrainloader, target_testloader, lr=1e-6)
-        evaluate_sparse_model(model_copy, mask_dict, target_testloader)
+        finetune_sparse_model(model_copy, all_one_mask_dict, subtrainloader, target_testloader, lr=1e-3)
+        evaluate_sparse_model(model_copy, all_one_mask_dict, target_testloader)
 
 
 

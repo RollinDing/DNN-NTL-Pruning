@@ -692,8 +692,8 @@ if __name__ == '__main__':
     # load args 
     args = get_args()
     
-    source_domain = 'usps'
-    target_domain = 'cifar10'
+    source_domain = 'mnist'
+    target_domain = 'usps'
     finetune_ratio = 0.1
 
     # Load the source dataset
@@ -741,9 +741,18 @@ if __name__ == '__main__':
     pruner.evaluate(source_testloader)
 
     # prune the model with 20% sparsity
-    mask_dict = pruner.iterative_prune(0.21, iterations=10)
+    mask_dict = pruner.iterative_prune(0.22, iterations=10)
     pruner.ntl_fine_tune_model(source_trainloader, target_trainloader, alpha=100, lr=1e-4)
     print("After NTL fine-tuning on the target dataset")
+
+    # save the model
+    model_dir = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/{source_domain}_to_{target_domain}')
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir)
+    
+    torch.save(pruner.model, f'{model_dir}/itp_model.pth')
+    torch.save(mask_dict, f'{model_dir}/itp_mask.pth')
+
     # model sparsity after pruning
     print('Model sparsity:', pruner.model_sparsity())
     pruner.evaluate(source_testloader)
