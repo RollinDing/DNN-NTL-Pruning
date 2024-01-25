@@ -163,6 +163,7 @@ def main():
     evaluate_sparse_model(source_model, mask_dict, source_testloader)
 
     print("Evaluate the model on target domain")
+    model = load_base_model(model, 'vgg11', source_domain, source_trainloader, source_testloader)
     target_model = PrunableVGG(model)
 
     finetune_sparse_model(target_model, mask_dict, target_trainloader, target_testloader, lr=1e-3)

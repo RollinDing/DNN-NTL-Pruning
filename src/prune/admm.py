@@ -158,6 +158,7 @@ class ADMMPruner:
             # Update model weights using ADMM loss
             loss_sum = 0
             admm_loss_sum = 0
+            target_loss_sum = 0
             sample_num = 0
             for epoch in range(self.nepochs):
                 for (source_input, source_labels), (target_input, target_labels) in zip(self.source_loader, self.target_loader):
@@ -174,7 +175,7 @@ class ADMMPruner:
 
                     source_loss = criterion(source_outputs, source_labels)
                     target_loss = criterion(target_outputs, target_labels)
-                    loss = source_loss - torch.clamp(alpha*target_loss, max=1)
+                    loss = source_loss - 1e2*torch.clamp(alpha*target_loss, max=1)
                     # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
 
                     # Compute ADMM regularization term with detached Z and U
@@ -189,16 +190,12 @@ class ADMMPruner:
 
                     # Record the admm loss
                     loss_sum += loss.item()
+                    target_loss_sum += target_loss.item()
                     admm_loss_sum += rho/2 * admm_reg.item()
                     sample_num += source_input.size(0)
                 # Print the admm loss
-                logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}')
-
-                # Check the model sparsity for each epoch as stop criterion
-                sparsity = self.model_sparsity()
-                if sparsity > self.prune_percentage:
-                    break
-                
+                logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}; target loss: {target_loss_sum / sample_num}')
+            
             # Update the Z variables
             l1_alpha = 1e-4
             Z_dict = self.update_Z_l1(U_dict, l1_alpha, rho)
@@ -212,6 +209,10 @@ class ADMMPruner:
             source_perf = self.evaluate(self.source_loader)
             target_perf = self.evaluate(self.target_loader)
             logging.info(f'Iteration {iteration}: source perf: {source_perf}, target perf: {target_perf}, model sparsity: {self.model_sparsity()}')
+            # Check the model sparsity for each epoch as stop criterion
+            sparsity = self.model_sparsity()
+            if sparsity > self.prune_percentage:
+                break
 
 def evaluate_sparse_model(model, mask_dict, trainloader, testloader, nepochs=30, lr=0.001):
     # Fine-tune the model using trainloader
@@ -279,7 +280,8 @@ def main():
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}.log')
-    logging.basicConfig(filename=log_path, level=logging.INFO)
+    # The log file should clear every time
+    logging.basicConfig(filename=log_path, filemode='w', level=logging.INFO)
     # Log the time 
     logging.info(time.asctime(time.localtime(time.time())))
     # Log the args
@@ -325,7 +327,7 @@ def main():
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
     
     modelcopy = deepcopy(model2prune)
-    admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=0.98)
+    admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
     logging.info("Evaluate the model before ADMM")
     logging.info("The model performance on source domain")
     admm_copy.finetune_model(source_trainloader, lr=1e-4, nepochs=50)
@@ -337,13 +339,18 @@ def main():
     logging.info(f"Target accuracy: {target_accuracy}")
 
     # Initialize the ADMM pruner
-    admm_pruner = ADMMPruner(model2prune, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=0.98)
+    admm_pruner = ADMMPruner(model2prune, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
     # Evaluate the model
     # admm_pruner.evaluate(source_testloader)
     # admm_pruner.evaluate(target_testloader)
 
     # Run the ADMM algorithm
     admm_pruner.run_admm()
+
+    # Create the directory to save the model
+    model_dir = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/{source_domain}_to_{target_domain}')
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir)
 
     # save the ADMM pruner as a pickle file
     with open(f'saved_models/{source_domain}_to_{target_domain}/admm_pruner.pkl', 'wb') as f:
@@ -369,10 +376,10 @@ def main():
 
     logging.info("Evaluate on the target domain")
     target_model = deepcopy(model)
-    evaluate_sparse_model(target_model, mask_dict, target_trainloader, target_testloader, nepochs=50, lr=1e-4)
+    target_accuracy = evaluate_sparse_model(target_model, mask_dict, target_trainloader, target_testloader, nepochs=50, lr=1e-4)
 
     # Save the finetuned target model
-    target_accuracy = torch.save(target_model, f'saved_models/{source_domain}_to_{target_domain}/admm_target_model.pth')
+    torch.save(target_model, f'saved_models/{source_domain}_to_{target_domain}/admm_target_model.pth')
     logging.info(f"Target accuracy: {target_accuracy}")
 
 
