@@ -2,7 +2,7 @@
 
 arch='vgg11'
 source='mnist'
-target='mnistm'
+target='usps'
 rho=0.01
 alpha=0.001
 lr=1e-5
