@@ -4,8 +4,8 @@
 arch='vgg11'
 source='mnist'
 target='usps'
-rho=1e-2
-alpha=0.001
+rho=1e-1
+alpha=1e3
 lr=1e-4
 epochs=10
 finetune_ratio=0.1

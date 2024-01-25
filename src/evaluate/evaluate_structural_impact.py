@@ -241,11 +241,20 @@ def main():
     # Training sample number
     train_sample_nums = [int(total_train_samples*ratio) for ratio in np.array([0.01, 0.05, 0.1, 0.2, 0.5, 1.0])]
 
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    source_model.to(device)
+    target_model.to(device)
+    
     # build an all-one mask 
     all_one_mask_dict = {}
     for name, param in target_model.named_parameters():
         if name in mask_dict:
             all_one_mask_dict[name] = torch.ones_like(mask_dict[name])
+
+    # # Replace the weights in target model with the remain weights in source model
+    # for name, param in source_model.named_parameters():
+    #     if name in mask_dict:
+    #         target_model.state_dict()[name].data = param.data * mask_dict[name] + target_model.state_dict()[name].data * (1 - mask_dict[name])
 
 
     # For each train sample num, randomly select the samples and evaluate the transferability
@@ -258,8 +267,8 @@ def main():
         # Evaluate the transferability 
         model_copy = deepcopy(target_model)    
 
-        finetune_sparse_model(model_copy, all_one_mask_dict, subtrainloader, target_testloader, lr=1e-3)
-        evaluate_sparse_model(model_copy, all_one_mask_dict, target_testloader)
+        finetune_sparse_model(model_copy, mask_dict, subtrainloader, target_testloader, lr=1e-4)
+        evaluate_sparse_model(model_copy, mask_dict, target_testloader)
 
 
 

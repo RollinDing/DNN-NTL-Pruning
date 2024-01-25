@@ -130,6 +130,50 @@ class ADMMPruner:
             if param.requires_grad:
                 self.mask_dict[name] = (Z_dict[name] != 0).float().to(self.device)
         return self.mask_dict
+    
+    def update_weights(self, Z_dict, U_dict, optimizer, criterion, scheduler, rho, alpha):
+        # Update model weights using ADMM loss
+        loss_sum = 0
+        admm_loss_sum = 0
+        target_loss_sum = 0
+        sample_num = 0
+        for epoch in range(self.nepochs):
+            for (source_input, source_labels), (target_input, target_labels) in zip(self.source_loader, self.target_loader):
+                source_input = source_input.to(self.device)
+                source_labels = source_labels.to(self.device)
+                target_input = target_input.to(self.device)
+                target_labels = target_labels.to(self.device)
+
+                optimizer.zero_grad()
+
+                # forward + backward + optimize
+                source_outputs = self.model(source_input, self.mask_dict)
+                target_outputs = self.model(target_input, self.mask_dict)
+
+                source_loss = criterion(source_outputs, source_labels)
+                target_loss = criterion(target_outputs, target_labels)
+                # loss = source_loss - alpha*torch.clamp(target_loss, max=10)
+                loss = source_loss + torch.log(1+alpha*source_loss/target_loss)
+                # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
+
+                # Compute ADMM regularization term with detached Z and U
+                admm_reg = sum([torch.norm((param - Z_dict[name].detach() + U_dict[name].detach()))
+                                for name, param in self.model.named_parameters() if param.requires_grad])
+
+                # Compute the total ADMM loss
+                admm_loss = loss + rho/2 * admm_reg
+                admm_loss.backward()
+                optimizer.step()
+
+                # Record the admm loss
+                loss_sum += loss.item()
+                target_loss_sum += target_loss.item()
+                admm_loss_sum += rho/2 * admm_reg.item()
+                sample_num += source_input.size(0)
+
+            scheduler.step()
+            # Print the admm loss
+            logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}; target loss: {target_loss_sum / sample_num}')
 
     def admm_loss(self, device, model, Z, U, rho, output, target, criterion):
         loss = criterion(output, target)
@@ -143,6 +187,7 @@ class ADMMPruner:
         # Run the ADMM algorithm
         # Initialize the optimizer
         optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
         # Initialize the loss function
         criterion = nn.CrossEntropyLoss()
         # Initialize the rho
@@ -150,52 +195,12 @@ class ADMMPruner:
         alpha = self.args.alpha
         # Initialize the Z and U variables
         Z_dict, U_dict = self.initialize_Z_and_U()
+        
         # Run the ADMM iterations
         # Set model to train mode
         self.model.train()
-
         for iteration in range(self.max_iterations):
-            # Update model weights using ADMM loss
-            loss_sum = 0
-            admm_loss_sum = 0
-            target_loss_sum = 0
-            sample_num = 0
-            for epoch in range(self.nepochs):
-                for (source_input, source_labels), (target_input, target_labels) in zip(self.source_loader, self.target_loader):
-                    source_input = source_input.to(self.device)
-                    source_labels = source_labels.to(self.device)
-                    target_input = target_input.to(self.device)
-                    target_labels = target_labels.to(self.device)
-
-                    optimizer.zero_grad()
-
-                    # forward + backward + optimize
-                    source_outputs = self.model(source_input, self.mask_dict)
-                    target_outputs = self.model(target_input, self.mask_dict)
-
-                    source_loss = criterion(source_outputs, source_labels)
-                    target_loss = criterion(target_outputs, target_labels)
-                    loss = source_loss - 1e2*torch.clamp(alpha*target_loss, max=1)
-                    # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
-
-                    # Compute ADMM regularization term with detached Z and U
-                    admm_reg = sum([torch.norm((param - Z_dict[name].detach() + U_dict[name].detach()))
-                                    for name, param in self.model.named_parameters() if param.requires_grad])
-
-                    # Compute the total ADMM loss
-                    admm_loss = loss + rho/2 * admm_reg
-                    # admm_loss = self.admm_loss(self.device, self.model, Z_dict, U_dict, rho, source_outputs, source_labels, criterion)
-                    admm_loss.backward()
-                    optimizer.step()
-
-                    # Record the admm loss
-                    loss_sum += loss.item()
-                    target_loss_sum += target_loss.item()
-                    admm_loss_sum += rho/2 * admm_reg.item()
-                    sample_num += source_input.size(0)
-                # Print the admm loss
-                logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}; target loss: {target_loss_sum / sample_num}')
-            
+            self.update_weights(Z_dict, U_dict, optimizer, criterion, scheduler, rho, alpha)
             # Update the Z variables
             l1_alpha = 1e-4
             Z_dict = self.update_Z_l1(U_dict, l1_alpha, rho)
@@ -203,8 +208,6 @@ class ADMMPruner:
             U_dict = self.update_U(U_dict, Z_dict)
             # Update the masks
             self.mask_dict = self.update_masks(Z_dict)
-            # Compute the model sparsity
-            # sparsity = self.model_sparsity()
             # Evaluate the model
             source_perf = self.evaluate(self.source_loader)
             target_perf = self.evaluate(self.target_loader)
@@ -326,17 +329,17 @@ def main():
     elif target_domain == 'stl':
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
     
-    modelcopy = deepcopy(model2prune)
-    admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
-    logging.info("Evaluate the model before ADMM")
-    logging.info("The model performance on source domain")
-    admm_copy.finetune_model(source_trainloader, lr=1e-4, nepochs=50)
-    source_accuracy = admm_copy.evaluate(source_testloader)
-    logging.info(f"Source accuracy: {source_accuracy}")
-    admm_copy.finetune_model(target_trainloader, lr=1e-4, nepochs=50)
-    logging.info("The model performance on target domain")
-    target_accuracy = admm_copy.evaluate(target_testloader)
-    logging.info(f"Target accuracy: {target_accuracy}")
+    # modelcopy = deepcopy(model2prune)
+    # admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
+    # logging.info("Evaluate the model before ADMM")
+    # logging.info("The model performance on source domain")
+    # admm_copy.finetune_model(source_trainloader, lr=1e-4, nepochs=50)
+    # source_accuracy = admm_copy.evaluate(source_testloader)
+    # logging.info(f"Source accuracy: {source_accuracy}")
+    # admm_copy.finetune_model(target_trainloader, lr=1e-4, nepochs=50)
+    # logging.info("The model performance on target domain")
+    # target_accuracy = admm_copy.evaluate(target_testloader)
+    # logging.info(f"Target accuracy: {target_accuracy}")
 
     # Initialize the ADMM pruner
     admm_pruner = ADMMPruner(model2prune, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
@@ -381,8 +384,6 @@ def main():
     # Save the finetuned target model
     torch.save(target_model, f'saved_models/{source_domain}_to_{target_domain}/admm_target_model.pth')
     logging.info(f"Target accuracy: {target_accuracy}")
-
-
     pass
 
 
