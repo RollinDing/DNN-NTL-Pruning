@@ -110,7 +110,7 @@ class ADMMPruner:
                 # Apply soft thresholding
                 new_z[z>delta] = z[z>delta] - delta
                 new_z[z<-delta] = z[z<-delta] + delta
-                new_z[abs(z) <= delta] = 0
+                new_z[abs(z)<=delta] = 0
                 new_Z[name] = new_z
         return new_Z
     
@@ -131,12 +131,18 @@ class ADMMPruner:
                 self.mask_dict[name] = (Z_dict[name] != 0).float().to(self.device)
         return self.mask_dict
     
-    def update_weights(self, Z_dict, U_dict, optimizer, criterion, scheduler, rho, alpha):
+    def update_weights(self, Z_dict, U_dict, rho, alpha):
         # Update model weights using ADMM loss
         loss_sum = 0
         admm_loss_sum = 0
         target_loss_sum = 0
         sample_num = 0
+        # Initialize the optimizer
+        optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=8, gamma=0.1)
+        # Initialize the loss function
+        criterion = nn.CrossEntropyLoss()
+
         for epoch in range(self.nepochs):
             for (source_input, source_labels), (target_input, target_labels) in zip(self.source_loader, self.target_loader):
                 source_input = source_input.to(self.device)
@@ -153,7 +159,7 @@ class ADMMPruner:
                 source_loss = criterion(source_outputs, source_labels)
                 target_loss = criterion(target_outputs, target_labels)
                 # loss = source_loss - alpha*torch.clamp(target_loss, max=10)
-                loss = source_loss + torch.log(1+alpha*source_loss/target_loss)
+                loss = source_loss + torch.log(1 + alpha*source_loss/target_loss)
                 # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
 
                 # Compute ADMM regularization term with detached Z and U
@@ -174,6 +180,35 @@ class ADMMPruner:
             scheduler.step()
             # Print the admm loss
             logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}; target loss: {target_loss_sum / sample_num}')
+        
+        target_optimizer = optim.Adam(self.model.parameters(), lr=1e-5)
+        source_optimizer = optim.Adam(self.model.parameters(), lr=1e-5)
+        for epoch in range(5):
+            for target_input, target_labels in self.target_loader:
+                target_input = target_input.to(self.device)
+                target_labels = target_labels.to(self.device)
+
+                target_optimizer.zero_grad()
+
+                # forward + backward + optimize
+                target_outputs = self.model(target_input, self.mask_dict)
+                target_loss = criterion(target_outputs, target_labels)
+
+                target_loss.backward()
+                target_optimizer.step()
+            
+            for source_input, source_labels in self.source_loader:
+                source_input = source_input.to(self.device)
+                source_labels = source_labels.to(self.device)
+
+                source_optimizer.zero_grad()
+
+                # forward + backward + optimize
+                source_outputs = self.model(source_input, self.mask_dict)
+                source_loss = criterion(source_outputs, source_labels)
+
+                source_loss.backward()
+                source_optimizer.step()
 
     def admm_loss(self, device, model, Z, U, rho, output, target, criterion):
         loss = criterion(output, target)
@@ -185,11 +220,7 @@ class ADMMPruner:
 
     def run_admm(self):
         # Run the ADMM algorithm
-        # Initialize the optimizer
-        optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
-        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
-        # Initialize the loss function
-        criterion = nn.CrossEntropyLoss()
+
         # Initialize the rho
         rho = self.args.rho
         alpha = self.args.alpha
@@ -200,10 +231,15 @@ class ADMMPruner:
         # Set model to train mode
         self.model.train()
         for iteration in range(self.max_iterations):
-            self.update_weights(Z_dict, U_dict, optimizer, criterion, scheduler, rho, alpha)
+            self.update_weights(Z_dict, U_dict, rho, alpha)
             # Update the Z variables
             l1_alpha = 1e-4
             Z_dict = self.update_Z_l1(U_dict, l1_alpha, rho)
+            # show the minimal non-zero value
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    print(f"Minimal non-zero value of {name}: {torch.max(param)}")
+                    break
             # Update the U variables
             U_dict = self.update_U(U_dict, Z_dict)
             # Update the masks
@@ -342,7 +378,7 @@ def main():
     # logging.info(f"Target accuracy: {target_accuracy}")
 
     # Initialize the ADMM pruner
-    admm_pruner = ADMMPruner(model2prune, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
+    admm_pruner = ADMMPruner(model2prune, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=0.98)
     # Evaluate the model
     # admm_pruner.evaluate(source_testloader)
     # admm_pruner.evaluate(target_testloader)
