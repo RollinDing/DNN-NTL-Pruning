@@ -16,7 +16,7 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from models.vgg import PrunableVGG
+from models.vgg import PrunableVGG, PrunableResNet18
 
 from prune.pruner import load_base_model
 from utils.args import get_args
@@ -61,7 +61,8 @@ class ADMMPruner:
         self.model.train()
 
         # Only fine-tune the unfrozen parameters
-        optimizer = torch.optim.SGD([param for name, param in self.model.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
+        # optimizer = torch.optim.SGD([param for name, param in self.model.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
+        optimizer = torch.optim.Adam([param for name, param in self.model.named_parameters() if param.requires_grad], lr=lr, weight_decay=1e-4)
         criterion = torch.nn.CrossEntropyLoss()
 
         for epoch in range(nepochs):
@@ -319,14 +320,19 @@ def main():
             nn.Dropout(p=0.5),
             nn.Linear(4096, num_classes),
         )
+    elif args.arch == 'resnet18':
+        model = torchvision.models.resnet18(pretrained=True)
+        model.fc = nn.Linear(512, num_classes)
+
     source_domain = args.source
     target_domain = args.target
     finetune_ratio = args.finetune_ratio
 
     # Create the logger 
-    log_dir = os.path.join(os.path.dirname(__file__), '../..', 'logs')
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
+        
     log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}.log')
     # The log file should clear every time
     logging.basicConfig(filename=log_path, filemode='w', level=logging.INFO)
@@ -353,10 +359,14 @@ def main():
     elif source_domain == 'stl':
         source_trainloader, source_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
 
-    model = load_base_model(model, 'vgg11', source_domain, source_trainloader, source_testloader)
+    model = load_base_model(model, args.arch, source_domain, source_trainloader, source_testloader)
 
     # Show the model architecture
-    model2prune = PrunableVGG(model)
+    print("Modify the model with prunable architecture!")
+    if args.arch == 'vgg11':
+        model2prune = PrunableVGG(model)
+    elif args.arch == 'resnet18':
+        model2prune = PrunableResNet18(model)
 
     # Load the target dataset
     if target_domain == 'mnist':
@@ -374,20 +384,21 @@ def main():
     elif target_domain == 'stl':
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
     
-    # modelcopy = deepcopy(model2prune)
-    # admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
-    # logging.info("Evaluate the model before ADMM")
-    # logging.info("The model performance on source domain")
-    # admm_copy.finetune_model(source_trainloader, lr=1e-4, nepochs=50)
-    # source_accuracy = admm_copy.evaluate(source_testloader)
-    # logging.info(f"Source accuracy: {source_accuracy}")
-    # admm_copy.finetune_model(target_trainloader, lr=1e-4, nepochs=50)
-    # logging.info("The model performance on target domain")
-    # target_accuracy = admm_copy.evaluate(target_testloader)
-    # logging.info(f"Target accuracy: {target_accuracy}")
+    modelcopy = deepcopy(model2prune)
+    admm_copy = ADMMPruner(modelcopy, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
+    logging.info("Evaluate the model before ADMM")
+    logging.info("The model performance on source domain")
+    admm_copy.finetune_model(source_trainloader, lr=1e-4, nepochs=50)
+    source_accuracy = admm_copy.evaluate(source_testloader)
+    logging.info(f"Source accuracy: {source_accuracy}")
+    admm_copy.finetune_model(target_trainloader, lr=1e-4, nepochs=50)
+    logging.info("The model performance on target domain")
+    target_accuracy = admm_copy.evaluate(target_testloader)
+    logging.info(f"Target accuracy: {target_accuracy}")
 
     # Initialize the ADMM pruner
     admm_pruner = ADMMPruner(model2prune, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=0.98)
+    
     # Evaluate the model
     # admm_pruner.evaluate(source_testloader)
     # admm_pruner.evaluate(target_testloader)
@@ -396,17 +407,17 @@ def main():
     admm_pruner.run_admm()
 
     # Create the directory to save the model
-    model_dir = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/{source_domain}_to_{target_domain}')
+    model_dir = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/{args.arch}/{source_domain}_to_{target_domain}')
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
 
     # save the ADMM pruner as a pickle file
-    with open(f'saved_models/{source_domain}_to_{target_domain}/admm_pruner.pkl', 'wb') as f:
+    with open(f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl', 'wb') as f:
         pickle.dump(admm_pruner, f)
 
     # Save the pruned model and masks
-    torch.save(admm_pruner.model, f'saved_models/{source_domain}_to_{target_domain}/admm_model.pth')
-    torch.save(admm_pruner.mask_dict, f'saved_models/{source_domain}_to_{target_domain}/admm_mask.pth')
+    torch.save(admm_pruner.model, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_model.pth')
+    torch.save(admm_pruner.mask_dict, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_mask.pth')
 
     # Fine-tune the model 
     # The model sparsity
@@ -418,7 +429,7 @@ def main():
     source_model = deepcopy(model)
     source_accuracy = evaluate_sparse_model(source_model, mask_dict, source_trainloader, source_testloader, nepochs=50, lr=1e-4)
     # Save the finetuned source model
-    torch.save(source_model, f'saved_models/{source_domain}_to_{target_domain}/admm_source_model.pth')
+    torch.save(source_model, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_source_model.pth')
 
     logging.info(f"Source accuracy: {source_accuracy}")
 
@@ -427,7 +438,7 @@ def main():
     target_accuracy = evaluate_sparse_model(target_model, mask_dict, target_trainloader, target_testloader, nepochs=50, lr=1e-4)
 
     # Save the finetuned target model
-    torch.save(target_model, f'saved_models/{source_domain}_to_{target_domain}/admm_target_model.pth')
+    torch.save(target_model, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_target_model.pth')
     logging.info(f"Target accuracy: {target_accuracy}")
     pass
 

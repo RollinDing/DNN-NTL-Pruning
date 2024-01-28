@@ -595,7 +595,7 @@ class NTLPruner:
 def load_base_model(model, model_name, source_domain, source_trainloader, source_testloader):
     base_model_dir = f'base_models/{model_name}-{source_domain}.pth'
     if os.path.exists(base_model_dir):
-        print('Loading the base model')
+        print('Loading the base model from {}'.format(base_model_dir))
         model.load_state_dict(torch.load(base_model_dir))
     else:
         # finetune the model on source dataset 

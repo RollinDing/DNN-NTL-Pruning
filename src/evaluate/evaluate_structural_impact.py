@@ -14,10 +14,7 @@ import os
 import pickle
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from models.vgg import PrunableVGG
-
 from prune.pruner import load_base_model
-from prune.admm import ADMMPruner
 
 from utils.args import get_args
 from utils.data import *
@@ -175,6 +172,11 @@ def main():
             nn.Dropout(p=0.5),
             nn.Linear(4096, num_classes),
         )
+    elif args.arch == 'resnet18':
+        # Load the pretrained model 
+        model = torchvision.models.resnet18(pretrained=True)
+        # change the output layer to 10 classes (for digits dataset)
+        model.fc = nn.Linear(512, num_classes)
 
     source_domain = args.source
     target_domain = args.target
@@ -276,7 +278,7 @@ def main():
         # Evaluate the transferability 
         model_copy = deepcopy(target_model)    
 
-        finetune_sparse_model(model_copy, mask_dict, subtrainloader, target_testloader, lr=1e-3)
+        finetune_sparse_model(model_copy, mask_dict, subtrainloader, target_testloader, lr=1e-4)
         evaluate_sparse_model(model_copy, mask_dict, target_testloader)
 
 
