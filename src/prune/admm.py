@@ -171,11 +171,20 @@ class ADMMPruner:
                 admm_loss.backward()
                 optimizer.step()
 
+                # apply the mask to the model
+                for name, param in self.model.named_parameters():
+                    if name in self.mask_dict:
+                        param.data = param.data * self.mask_dict[name]
+                        # set the gradient to zero
+                        param.grad = param.grad * self.mask_dict[name]
+
                 # Record the admm loss
                 loss_sum += loss.item()
                 target_loss_sum += target_loss.item()
                 admm_loss_sum += rho/2 * admm_reg.item()
                 sample_num += source_input.size(0)
+
+
 
             scheduler.step()
             # Print the admm loss

@@ -1,8 +1,8 @@
 #/bin/bash
 
 arch='vgg11'
-source='mnist'
-target='usps'
+source='syn'
+target='mnist'
 rho=0.01
 alpha=0.001
 lr=1e-5

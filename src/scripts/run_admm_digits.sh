@@ -4,12 +4,10 @@
 source_set=('mnist' 'mnistm' 'svhn' 'usps' 'syn')
 target_set=('mnistm' 'svhn' 'usps' 'syn' 'mnist')
 arch='vgg11'
-source='mnist'
-target='usps'
-rho=1e-2
-alpha=0.001
+rho=0.1
+alpha=1e4
 lr=1e-4
-epochs=10
+epochs=20
 finetune_ratio=0.1
 
 for source in ${source_set[@]}
