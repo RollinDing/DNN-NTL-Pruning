@@ -1,8 +1,8 @@
 #/bin/bash
 
-arch='vgg11'
-source='usps'
-target='mnist'
+arch='resnet18'
+source='mnist'
+target='usps'
 rho=0.01
 alpha=0.001
 lr=1e-5

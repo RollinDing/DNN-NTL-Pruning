@@ -66,7 +66,7 @@ def finetune_sparse_model(model, mask_dict, trainloader, testloader, nepochs=50,
                 if name in mask_dict:
                     param.data = param.data * mask_dict[name]
                     # set the gradient to zero
-                    param.grad = param.grad * mask_dict[name]
+                    # param.grad = param.grad * mask_dict[name]
 
         print(f"Epoch {epoch}: {total_loss/count}")
 
@@ -198,7 +198,7 @@ def main():
     elif source_domain == 'stl':
         source_trainloader, source_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
 
-    model = load_base_model(model, 'vgg11', source_domain, source_trainloader, source_testloader)
+    model = load_base_model(model, args.arch, source_domain, source_trainloader, source_testloader)
     
     # Load the target dataset
     if target_domain == 'mnist':
@@ -219,12 +219,13 @@ def main():
     # evaluate_transferability_with_ratio(model, target_trainloader, target_testloader)
 
     # Load the pretrained model from saved state dict
-    model_path = f'saved_models/{source_domain}_to_{target_domain}/admm_model.pth'
-    mask_path  = f'saved_models/{source_domain}_to_{target_domain}/admm_mask.pth'
-    admm_pickle_path = f'saved_models/{source_domain}_to_{target_domain}/admm_pruner.pkl'
+    model_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_model.pth'
+    mask_path  = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_mask.pth'
+    admm_pickle_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl'
 
     pruned_model = torch.load(model_path)
     mask_dict = torch.load(mask_path)
+
     # admm_pruner = ADMMPruner(pruned_model, source_trainloader, target_trainloader, args)
 
     # mask_dict = torch.load(mask_path)
@@ -267,7 +268,6 @@ def main():
     #     if name in mask_dict:
     #         target_model.state_dict()[name].data = param.data * mask_dict[name] + target_model.state_dict()[name].data * (1 - mask_dict[name])
 
-
     # For each train sample num, randomly select the samples and evaluate the transferability
     for train_sample_num in train_sample_nums:
         print(f"Train sample num: {train_sample_num}")
@@ -280,9 +280,6 @@ def main():
 
         finetune_sparse_model(model_copy, mask_dict, subtrainloader, target_testloader, lr=1e-4)
         evaluate_sparse_model(model_copy, mask_dict, target_testloader)
-
-
-
 
 if __name__ == "__main__":
     # Set the random seed for reproducible experiments
