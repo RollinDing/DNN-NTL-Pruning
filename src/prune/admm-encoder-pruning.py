@@ -43,6 +43,10 @@ class ADMMEncoderPruner:
         self.encoder = encoder
         self.source_classifier = deepcopy(classifier)
         self.target_classifier = deepcopy(classifier)
+        # Move the model to the device
+        self.encoder.to(self.device)
+        self.source_classifier.to(self.device)
+        self.target_classifier.to(self.device)
 
         self.mask_dict = {}
         # initialize the mask_dict
@@ -59,11 +63,12 @@ class ADMMEncoderPruner:
             for input, labels in data_loader:
                 input = input.to(self.device)
                 labels = labels.to(self.device)
-                outputs = self.model(input, self.mask_dict)
+                features = self.encoder(input, self.mask_dict)
+                outputs = self.source_classifier(features)
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
-        # print(f'Accuracy on dataset: {correct / total}\n')
+        print(f'Accuracy on dataset: {correct / total}')
         return correct / total
 
     def finetune_model(self, dataloader, nepochs=30, lr=1e-3):
@@ -82,7 +87,8 @@ class ADMMEncoderPruner:
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
                 optimizer.zero_grad()
-                outputs = self.model(inputs, self.mask_dict)
+                features = self.encoder(input, self.mask_dict)
+                outputs = self.source_classifier(features)
                 loss = criterion(outputs, labels)
                 loss.backward()
                 total_loss += loss.item()
@@ -163,12 +169,12 @@ class ADMMEncoderPruner:
                 optimizer_encoder.zero_grad()
 
                 # The architecture-specific forward pass 
-                # TODO???
                 if self.args.arch == 'resnet18':
                     source_features = self.encoder(source_input, self.mask_dict)
                     target_features = self.encoder(target_input, self.mask_dict)
                     
-                target_outputs = self.model(target_input, self.mask_dict)
+                source_outputs = self.source_classifier(source_features)
+                target_outputs = self.target_classifier(target_features)
 
                 source_loss = criterion(source_outputs, source_labels)
                 target_loss = criterion(target_outputs, target_labels)
@@ -178,7 +184,7 @@ class ADMMEncoderPruner:
 
                 # Compute ADMM regularization term with detached Z and U
                 admm_reg = sum([torch.norm((param - Z_dict[name].detach() + U_dict[name].detach()))
-                                for name, param in self.model.named_parameters() if param.requires_grad])
+                                for name, param in self.encoder.named_parameters() if param.requires_grad])
 
                 # Compute the total ADMM loss
                 admm_loss = loss + rho/2 * admm_reg
@@ -186,7 +192,7 @@ class ADMMEncoderPruner:
                 optimizer_encoder.step()
 
                 # apply the mask to the model
-                for name, param in self.model.named_parameters():
+                for name, param in self.encoder.named_parameters():
                     if name in self.mask_dict:
                         param.data = param.data * self.mask_dict[name]
                         # set the gradient to zero
@@ -201,32 +207,42 @@ class ADMMEncoderPruner:
             # Print the admm loss
             logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}; target loss: {target_loss_sum / sample_num}')
         
-        target_optimizer = optim.Adam(self.model.parameters(), lr=1e-5)
-        source_optimizer = optim.Adam(self.model.parameters(), lr=1e-5)
-        for epoch in range(10):
+        nepochs = 50
+        target_optimizer = optim.Adam(self.target_classifier.parameters(), lr=1e-3, weight_decay=1e-4)
+        for epoch in range(nepochs):
+            # Finetune the target classifier
             for target_input, target_labels in self.target_loader:
                 target_input = target_input.to(self.device)
                 target_labels = target_labels.to(self.device)
                 target_optimizer.zero_grad()
 
                 # forward + backward + optimize
-                target_outputs = self.model(target_input, self.mask_dict)
+                target_features = self.encoder(target_input, self.mask_dict)
+                target_outputs = self.target_classifier(target_features)
                 target_loss = criterion(target_outputs, target_labels)
 
                 target_loss.backward()
                 target_optimizer.step()
-            
+
+            # print(f"Epoch {epoch}: Target loss: {target_loss.item()}")
+
+        source_optimizer = optim.Adam(self.source_classifier.parameters(), lr=1e-3, weight_decay=1e-4)
+        for epoch in range(nepochs):
+            # Finetune the source classifier            
             for source_input, source_labels in self.source_loader:
                 source_input = source_input.to(self.device)
                 source_labels = source_labels.to(self.device)
                 source_optimizer.zero_grad()
 
                 # forward + backward + optimize
-                source_outputs = self.model(source_input, self.mask_dict)
+                source_features = self.encoder(source_input, self.mask_dict)
+                source_outputs = self.source_classifier(source_features)
                 source_loss = criterion(source_outputs, source_labels)
 
                 source_loss.backward()
                 source_optimizer.step()
+
+            # print(f"Epoch {epoch}: Source loss: {source_loss.item()}")
 
     def admm_loss(self, device, model, Z, U, rho, output, target, criterion):
         loss = criterion(output, target)
@@ -247,14 +263,14 @@ class ADMMEncoderPruner:
         
         # Run the ADMM iterations
         # Set model to train mode
-        self.model.train()
+        self.encoder.train()
         for iteration in range(self.max_iterations):
             self.update_weights(Z_dict, U_dict, rho, alpha)
             # Update the Z variables
             l1_alpha = 1e-4
             Z_dict = self.update_Z_l1(U_dict, l1_alpha, rho)
             # show the minimal non-zero value
-            for name, param in self.model.named_parameters():
+            for name, param in self.encoder.named_parameters():
                 if param.requires_grad:
                     print(f"Minimal non-zero value of {name}: {torch.max(param)}")
                     break
@@ -274,7 +290,109 @@ class ADMMEncoderPruner:
 
 
 def main():
-    pass
+    # load args 
+    args = get_args()
+    num_classes = 10
+    if args.arch == 'vgg11':
+        # Load the pretrained model 
+        model = torchvision.models.vgg11(pretrained=True)
+        # change the output layer to 10 classes (for digits dataset)
+        model.classifier = nn.Sequential(
+            nn.Linear(512 * 7 * 7, 4096),
+            nn.ReLU(True),
+            nn.Dropout(p=0.5),
+            nn.Linear(4096, 4096),
+            nn.ReLU(True),
+            nn.Dropout(p=0.5),
+            nn.Linear(4096, num_classes),
+        )
+    elif args.arch == 'resnet18':
+        model = torchvision.models.resnet18(pretrained=True)
+        model.fc = nn.Linear(512, num_classes)
+
+    source_domain = args.source
+    target_domain = args.target
+    finetune_ratio = args.finetune_ratio
+
+    # Create the logger 
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}')
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}.log')
+    # The log file should clear every time
+    logging.basicConfig(filename=log_path, filemode='w', level=logging.INFO)
+    # Log the time 
+    logging.info(time.asctime(time.localtime(time.time())))
+    # Log the args
+    logging.info(args)
+    # Log the source and target domain
+    logging.info(f'ADMM: {source_domain} to {target_domain}')
+
+    # Load the source dataset
+    if source_domain == 'mnist':
+        source_trainloader, source_testloader = get_mnist_dataloader(args, ratio=finetune_ratio)
+    elif source_domain == 'cifar10':
+        source_trainloader, source_testloader = get_cifar_dataloader(args, ratio=finetune_ratio)
+    elif source_domain == 'usps':
+        source_trainloader, source_testloader = get_usps_dataloader(args, ratio=finetune_ratio)
+    elif source_domain == 'svhn':
+        source_trainloader, source_testloader = get_svhn_dataloader(args, ratio=finetune_ratio)
+    elif source_domain == 'mnistm':
+        source_trainloader, source_testloader = get_mnistm_dataloader(args, ratio=finetune_ratio)
+    elif source_domain == 'syn':
+        source_trainloader, source_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
+    elif source_domain == 'stl':
+        source_trainloader, source_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
+
+    model = load_base_model(model, args.arch, source_domain, source_trainloader, source_testloader)
+
+    # Load the target dataset
+    if target_domain == 'mnist':
+        target_trainloader, target_testloader = get_mnist_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'cifar10':
+        target_trainloader, target_testloader = get_cifar_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'usps':
+        target_trainloader, target_testloader = get_usps_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'svhn':
+        target_trainloader, target_testloader = get_svhn_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'mnistm':
+        target_trainloader, target_testloader = get_mnistm_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'syn':
+        target_trainloader, target_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'stl':
+        target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
+    
+    resnet_encoder = ResNetEncoder(model)
+    resnet_classifier = ResNetClassifier(model)
+    # Initialize the ADMM pruner
+    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=0.98)
+    
+    # Evaluate the model
+    admm_pruner.evaluate(source_testloader)
+    admm_pruner.evaluate(target_testloader)
+
+    # Run the ADMM algorithm
+    admm_pruner.run_admm()
+
+    # Create the directory to save the model
+    model_dir = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/{args.arch}/{source_domain}_to_{target_domain}')
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir)
+
+    # save the ADMM pruner as a pickle file
+    with open(f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl', 'wb') as f:
+        pickle.dump(admm_pruner, f)
+
+    # Save the pruned model and masks
+    torch.save(admm_pruner.encoder, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_encoder.pth')
+    torch.save(admm_pruner.source_classifier, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_source_classifier.pth')
+    torch.save(admm_pruner.mask_dict, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_mask.pth')
+
 
 if __name__ == '__main__':
+    # Set the random seed for reproducible experiments
+    torch.manual_seed(1234)
+    np.random.seed(1234)
+
     main()
