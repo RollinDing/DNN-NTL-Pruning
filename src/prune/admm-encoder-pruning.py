@@ -207,8 +207,9 @@ class ADMMEncoderPruner:
             # Print the admm loss
             logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}; target loss: {target_loss_sum / sample_num}')
         
-        nepochs = 50
-        target_optimizer = optim.Adam(self.target_classifier.parameters(), lr=1e-3, weight_decay=1e-4)
+        nepochs = 20
+        # finetune both classifier and encoder
+        target_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad] + [param for name, param in self.target_classifier.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
         for epoch in range(nepochs):
             # Finetune the target classifier
             for target_input, target_labels in self.target_loader:
@@ -224,9 +225,9 @@ class ADMMEncoderPruner:
                 target_loss.backward()
                 target_optimizer.step()
 
-            # print(f"Epoch {epoch}: Target loss: {target_loss.item()}")
+            print(f"Epoch {epoch}: Target loss: {target_loss.item()}")
 
-        source_optimizer = optim.Adam(self.source_classifier.parameters(), lr=1e-3, weight_decay=1e-4)
+        source_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad] + [param for name, param in self.source_classifier.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=1e-4)
         for epoch in range(nepochs):
             # Finetune the source classifier            
             for source_input, source_labels in self.source_loader:
@@ -242,7 +243,7 @@ class ADMMEncoderPruner:
                 source_loss.backward()
                 source_optimizer.step()
 
-            # print(f"Epoch {epoch}: Source loss: {source_loss.item()}")
+            print(f"Epoch {epoch}: Source loss: {source_loss.item()}")
 
     def admm_loss(self, device, model, Z, U, rho, output, target, criterion):
         loss = criterion(output, target)

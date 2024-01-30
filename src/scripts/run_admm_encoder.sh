@@ -3,8 +3,8 @@
 # Run ADMM
 arch='resnet18'
 source='mnist'
-target='usps'
-rho=0.1
+target='syn'
+rho=0.01
 alpha=1e4
 lr=1e-4
 epochs=20
