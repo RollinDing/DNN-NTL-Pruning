@@ -22,7 +22,7 @@ from models.encoders import ResNetEncoder, ResNetClassifier
 from prune.pruner import load_base_model
 from utils.args import get_args
 from utils.data import *
-
+from itertools import cycle
 
 class ADMMEncoderPruner:
     def __init__(self, encoder, classifier, source_loader, target_loader, args, prune_percentage=0.9, source_perf_threshold=0.9, max_iterations=30):    
@@ -149,14 +149,15 @@ class ADMMEncoderPruner:
     
     def initialize_target_classifier(self):
         # Initialize the target classifier
-        # The target classifier is intialized and finetuned on the target dataset
-
         # Initialize the optimizer
         optimizer = optim.Adam([param for name, param in self.target_classifier.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
         # Initialize the loss function
         criterion = nn.CrossEntropyLoss()
 
-        for epoch in range(self.nepochs):
+        best_loss = 0.0
+        patience = 10
+        for epoch in range(100):
+            total_loss = 0.0
             for target_input, target_labels in self.target_loader:
                 target_input = target_input.to(self.device)
                 target_labels = target_labels.to(self.device)
@@ -169,6 +170,7 @@ class ADMMEncoderPruner:
 
                 target_loss.backward()
                 optimizer.step()
+                total_loss += target_loss.item()
 
                 # apply the mask to the model
                 for name, param in self.encoder.named_parameters():
@@ -176,6 +178,16 @@ class ADMMEncoderPruner:
                         param.data = param.data * self.mask_dict[name]
                         # set the gradient to zero
                         param.grad = param.grad * self.mask_dict[name]
+            
+            # Early Stop Criterion:
+            # If the loss does not decrease for 10 epochs, stop the training
+            if total_loss > best_loss:
+                best_loss = total_loss
+                patience = 10
+            else:
+                patience -= 1
+                if patience == 0:
+                    break
 
     def update_weights(self, Z_dict, U_dict, rho, alpha):
         # Update model weights using ADMM loss
@@ -183,12 +195,10 @@ class ADMMEncoderPruner:
         admm_loss_sum = 0
         target_loss_sum = 0
         sample_num = 0
-        # Initialize the optimizer TODO: How to update the parameters?
+        
         # Iteratively update the model weights with ntl, on target dataset and on source dataset
-
         encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.lr, weight_decay=0.0008)
-
-        # Build an surrogate encoder to find the real target loss 
+        # Build an surrogate encoder to find the real target loss
         target_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
         source_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
        
@@ -197,6 +207,14 @@ class ADMMEncoderPruner:
 
         for epoch in range(self.nepochs):
             for (source_input, source_labels), (target_input, target_labels) in zip(self.source_loader, self.target_loader):
+                # make sure the source and target has the same number of samples
+                if source_input.size(0) > target_input.size(0):
+                    source_input = source_input[:target_input.size(0)]
+                    source_labels = source_labels[:target_input.size(0)]
+                else:
+                    target_input = target_input[:source_input.size(0)]
+                    target_labels = target_labels[:source_input.size(0)]
+
                 source_input = source_input.to(self.device)
                 source_labels = source_labels.to(self.device)
                 target_input = target_input.to(self.device)
@@ -248,8 +266,21 @@ class ADMMEncoderPruner:
 
                 source_loss = criterion(source_outputs, source_labels)
                 target_loss = criterion(target_outputs, target_labels)
-                # loss = source_loss - alpha*torch.clamp(target_loss, max=10)
-                loss = source_loss + torch.log(1 + alpha*source_loss/target_loss)
+
+                # normalize features 
+                source_features = F.normalize(source_features, p=2, dim=1)
+                target_features = F.normalize(target_features, p=2, dim=1)
+
+                # The loss also contains the variance of the features in both domains
+                u = 1
+                v = 1e3
+                loss = source_loss - alpha*torch.clamp(target_loss, max=10) + u*torch.sum(torch.var(source_features, dim=0)) - v*torch.sum(torch.var(target_features, dim=0))
+
+                # The loss contains the dot product (at the second dim) of the features between two domains (to make the feature o
+
+                # loss = source_loss  - alpha*torch.clamp(target_loss, max=10) # + 1e-2 * torch.sum(source_features * target_features)
+
+                # loss = source_loss + torch.log(1 + alpha*source_loss/target_loss)
                 # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
 
                 # Compute ADMM regularization term with detached Z and U

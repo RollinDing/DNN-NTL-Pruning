@@ -22,6 +22,12 @@ from prune.pruner import load_base_model
 from utils.args import get_args
 from utils.data import *
 
+def load_ssl_model(args):
+    # load the pretrained model trained with self-supervised learning
+    method = "simclr"
+    model_path = f"{args.arch}-{method}-{args.source}.tar" 
+    model = torch.load(model_path)
+    return model
 
 def main():
     # load args 

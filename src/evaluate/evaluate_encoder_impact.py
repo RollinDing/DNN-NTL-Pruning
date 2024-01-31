@@ -236,7 +236,7 @@ def main():
     print("Evaluate the model on source domain")
     source_encoder = deepcopy(resnet_encoder)
     source_classifier = deepcopy(resnet_classifier)
-    # finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
+    finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
     evaluate_sparse_encoder(source_encoder, source_classifier, mask_dict, source_testloader)
 
     print("Evaluate the model on target domain")
