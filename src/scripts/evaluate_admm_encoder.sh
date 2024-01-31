@@ -2,7 +2,7 @@
 
 arch='resnet18'
 source='mnist'
-target='mnistm'
+target='syn'
 rho=0.01
 alpha=0.001
 lr=1e-3

@@ -336,8 +336,8 @@ def main():
 
     # Test the transferability 
 
-    # finetune_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, target_trainloader, target_testloader, nepochs=50, lr=0.001)
-    # evaluate_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, target_testloader)
+    finetune_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, target_trainloader, target_testloader, nepochs=50, lr=0.001)
+    evaluate_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, target_testloader)
     # pass 
 
 if __name__ == "__main__":

@@ -76,7 +76,8 @@ class ADMMEncoderPruner:
 
         # Only fine-tune the unfrozen parameters
         # optimizer = torch.optim.SGD([param for name, param in self.model.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
-        optimizer = torch.optim.Adam([param for name, param in self.model.named_parameters() if param.requires_grad], lr=lr, weight_decay=1e-4)
+        optimizer = torch.optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad]+
+                                     [param for name, param in self.source_classifier.named_parameters() if param.requires_grad], lr=lr, weight_decay=0.0008)
         criterion = torch.nn.CrossEntropyLoss()
 
         for epoch in range(nepochs):
@@ -86,7 +87,7 @@ class ADMMEncoderPruner:
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
                 optimizer.zero_grad()
-                features = self.encoder(input, self.mask_dict)
+                features = self.encoder(inputs, self.mask_dict)
                 outputs = self.source_classifier(features)
                 loss = criterion(outputs, labels)
                 loss.backward()
@@ -150,7 +151,7 @@ class ADMMEncoderPruner:
     def initialize_target_classifier(self):
         # Initialize the target classifier
         # Initialize the optimizer
-        optimizer = optim.Adam([param for name, param in self.target_classifier.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
+        optimizer = optim.Adam([param for name, param in self.target_classifier.named_parameters() if param.requires_grad], lr=1e-3, weight_decay=0.0008)
         # Initialize the loss function
         criterion = nn.CrossEntropyLoss()
 
