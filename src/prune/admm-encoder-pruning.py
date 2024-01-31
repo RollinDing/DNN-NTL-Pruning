@@ -19,7 +19,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models.vgg import PrunableVGG, PrunableResNet18
 from models.encoders import ResNetEncoder, ResNetClassifier
 
-
 from prune.pruner import load_base_model
 from utils.args import get_args
 from utils.data import *
@@ -56,7 +55,7 @@ class ADMMEncoderPruner:
     
     def evaluate(self, data_loader):
         # Evaluation the model with the mask applied
-        self.encoder.eval()
+        self.encoder.train()
         total = 0
         correct = 0
         with torch.no_grad():
@@ -148,6 +147,36 @@ class ADMMEncoderPruner:
                 self.mask_dict[name] = (Z_dict[name] != 0).float().to(self.device)
         return self.mask_dict
     
+    def initialize_target_classifier(self):
+        # Initialize the target classifier
+        # The target classifier is intialized and finetuned on the target dataset
+
+        # Initialize the optimizer
+        optimizer = optim.Adam([param for name, param in self.target_classifier.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
+        # Initialize the loss function
+        criterion = nn.CrossEntropyLoss()
+
+        for epoch in range(self.nepochs):
+            for target_input, target_labels in self.target_loader:
+                target_input = target_input.to(self.device)
+                target_labels = target_labels.to(self.device)
+                optimizer.zero_grad()
+
+                # forward + backward + optimize
+                target_features = self.encoder(target_input, self.mask_dict)
+                target_outputs = self.target_classifier(target_features)
+                target_loss = criterion(target_outputs, target_labels)
+
+                target_loss.backward()
+                optimizer.step()
+
+                # apply the mask to the model
+                for name, param in self.encoder.named_parameters():
+                    if name in self.mask_dict:
+                        param.data = param.data * self.mask_dict[name]
+                        # set the gradient to zero
+                        param.grad = param.grad * self.mask_dict[name]
+
     def update_weights(self, Z_dict, U_dict, rho, alpha):
         # Update model weights using ADMM loss
         loss_sum = 0
@@ -155,7 +184,14 @@ class ADMMEncoderPruner:
         target_loss_sum = 0
         sample_num = 0
         # Initialize the optimizer TODO: How to update the parameters?
-        optimizer_encoder = optim.Adam(self.encoder.parameters(), lr=self.lr)
+        # Iteratively update the model weights with ntl, on target dataset and on source dataset
+
+        encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.lr, weight_decay=0.0008)
+
+        # Build an surrogate encoder to find the real target loss 
+        target_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
+        source_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
+       
         # Initialize the loss function
         criterion = nn.CrossEntropyLoss()
 
@@ -166,7 +202,41 @@ class ADMMEncoderPruner:
                 target_input = target_input.to(self.device)
                 target_labels = target_labels.to(self.device)
 
-                optimizer_encoder.zero_grad()
+                # # Update the encoder according to the target domain
+                # target_optimizer.zero_grad()
+
+                # # forward + backward + optimize
+                # target_features = self.encoder(target_input, self.mask_dict)
+                # target_outputs = self.target_classifier(target_features)
+                # target_loss = criterion(target_outputs, target_labels)
+
+                # target_loss.backward()
+                # target_optimizer.step()
+
+                # # apply the mask to the model
+                # for name, param in self.encoder.named_parameters():
+                #     if name in self.mask_dict:
+                #         param.data = param.data * self.mask_dict[name]
+                #         # set the gradient to zero
+                #         param.grad = param.grad * self.mask_dict[name]
+
+                # source_optimizer.zero_grad()
+                # # forward + backward + optimize
+                # source_features = self.encoder(source_input, self.mask_dict)
+                # source_outputs = self.source_classifier(source_features)
+                # source_loss = criterion(source_outputs, source_labels)
+
+                # source_loss.backward()
+                # source_optimizer.step()
+
+                # # apply the mask to the model
+                # for name, param in self.encoder.named_parameters():
+                #     if name in self.mask_dict:
+                #         param.data = param.data * self.mask_dict[name]
+                #         # set the gradient to zero
+                #         param.grad = param.grad * self.mask_dict[name]
+
+                encoder_optimizer.zero_grad()
 
                 # The architecture-specific forward pass 
                 if self.args.arch == 'resnet18':
@@ -189,7 +259,7 @@ class ADMMEncoderPruner:
                 # Compute the total ADMM loss
                 admm_loss = loss + rho/2 * admm_reg
                 admm_loss.backward()
-                optimizer_encoder.step()
+                encoder_optimizer.step()
 
                 # apply the mask to the model
                 for name, param in self.encoder.named_parameters():
@@ -204,46 +274,19 @@ class ADMMEncoderPruner:
                 admm_loss_sum += rho/2 * admm_reg.item()
                 sample_num += source_input.size(0)
 
+            # # how many percentage parameters are adjusted 
+            # changed = 0
+            # total = 0
+            # for name, param in self.encoder.named_parameters():
+            #     if param.requires_grad:
+            #         changed += torch.sum(param.grad != 0).item()
+            #         total += param.numel()
+            # print(f"Percentage of changed parameters: {changed/total}")
+
             # Print the admm loss
             logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}; target loss: {target_loss_sum / sample_num}')
-        
-        nepochs = 20
-        # finetune both classifier and encoder
-        target_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad] + [param for name, param in self.target_classifier.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
-        for epoch in range(nepochs):
-            # Finetune the target classifier
-            for target_input, target_labels in self.target_loader:
-                target_input = target_input.to(self.device)
-                target_labels = target_labels.to(self.device)
-                target_optimizer.zero_grad()
-
-                # forward + backward + optimize
-                target_features = self.encoder(target_input, self.mask_dict)
-                target_outputs = self.target_classifier(target_features)
-                target_loss = criterion(target_outputs, target_labels)
-
-                target_loss.backward()
-                target_optimizer.step()
-
-            print(f"Epoch {epoch}: Target loss: {target_loss.item()}")
-
-        source_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad] + [param for name, param in self.source_classifier.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=1e-4)
-        for epoch in range(nepochs):
-            # Finetune the source classifier            
-            for source_input, source_labels in self.source_loader:
-                source_input = source_input.to(self.device)
-                source_labels = source_labels.to(self.device)
-                source_optimizer.zero_grad()
-
-                # forward + backward + optimize
-                source_features = self.encoder(source_input, self.mask_dict)
-                source_outputs = self.source_classifier(source_features)
-                source_loss = criterion(source_outputs, source_labels)
-
-                source_loss.backward()
-                source_optimizer.step()
-
-            print(f"Epoch {epoch}: Source loss: {source_loss.item()}")
+            # logging.info(f"Epoch {epoch}: Source loss: {source_loss.item()}")
+            # logging.info(f"Epoch {epoch}: Target loss: {target_loss.item()}")
 
     def admm_loss(self, device, model, Z, U, rho, output, target, criterion):
         loss = criterion(output, target)
@@ -270,11 +313,7 @@ class ADMMEncoderPruner:
             # Update the Z variables
             l1_alpha = 1e-4
             Z_dict = self.update_Z_l1(U_dict, l1_alpha, rho)
-            # show the minimal non-zero value
-            for name, param in self.encoder.named_parameters():
-                if param.requires_grad:
-                    print(f"Minimal non-zero value of {name}: {torch.max(param)}")
-                    break
+
             # Update the U variables
             U_dict = self.update_U(U_dict, Z_dict)
             # Update the masks
@@ -308,7 +347,7 @@ def main():
             nn.Linear(4096, num_classes),
         )
     elif args.arch == 'resnet18':
-        model = torchvision.models.resnet18(pretrained=True)
+        model = torchvision.models.resnet18(pretrained=False)
         model.fc = nn.Linear(512, num_classes)
 
     source_domain = args.source
@@ -367,8 +406,8 @@ def main():
     resnet_encoder = ResNetEncoder(model)
     resnet_classifier = ResNetClassifier(model)
     # Initialize the ADMM pruner
-    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=0.98)
-    
+    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=50, prune_percentage=0.98)
+    admm_pruner.initialize_target_classifier()
     # Evaluate the model
     admm_pruner.evaluate(source_testloader)
     admm_pruner.evaluate(target_testloader)

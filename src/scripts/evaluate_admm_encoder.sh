@@ -2,10 +2,10 @@
 
 arch='resnet18'
 source='mnist'
-target='syn'
+target='usps'
 rho=0.01
 alpha=0.001
-lr=1e-4
+lr=1e-2
 epochs=10
 finetune_ratio=0.1
 

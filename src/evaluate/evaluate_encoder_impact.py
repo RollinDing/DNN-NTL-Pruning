@@ -20,7 +20,7 @@ from models.encoders import ResNetEncoder, ResNetClassifier
 from utils.args import get_args
 from utils.data import *
 
-def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloader, nepochs=50, lr=0.001):
+def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloader, nepochs=30, lr=0.001):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     encoder.to(device)
     classifier.to(device)
@@ -52,14 +52,14 @@ def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloa
                 if name in mask_dict:
                     param.data = param.data * mask_dict[name]
                     # set the gradient to zero
-                    # param.grad = param.grad * mask_dict[name]
+                    param.grad = param.grad * mask_dict[name]
 
         print(f"Epoch {epoch}: {total_loss/count}")
 
         # # how many percentage parameters are adjusted 
         # changed = 0
         # total = 0
-        # for name, param in model.named_parameters():
+        # for name, param in encoder.named_parameters():
         #     if param.requires_grad:
         #         changed += torch.sum(param.grad != 0).item()
         #         total += param.numel()
@@ -217,6 +217,8 @@ def main():
     admm_pickle_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl'
 
     mask_dict = torch.load(mask_path)
+    resnet_encoder = torch.load(encoder_path)
+    resnet_classifier = torch.load(classifier_path)
 
     # admm_pruner = ADMMPruner(pruned_model, source_trainloader, target_trainloader, args)
 
@@ -234,7 +236,7 @@ def main():
     print("Evaluate the model on source domain")
     source_encoder = deepcopy(resnet_encoder)
     source_classifier = deepcopy(resnet_classifier)
-    finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
+    # finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
     evaluate_sparse_encoder(source_encoder, source_classifier, mask_dict, source_testloader)
 
     print("Evaluate the model on target domain")
@@ -252,10 +254,10 @@ def main():
     target_classifier.to(device)
     
     # build an all-one mask 
-    all_one_mask_dict = {}
-    for name, param in target_encoder.named_parameters():
-        if name in mask_dict:
-            all_one_mask_dict[name] = torch.ones_like(mask_dict[name])
+    # all_one_mask_dict = {}
+    # for name, param in target_encoder.named_parameters():
+    #     if name in mask_dict:
+    #         all_one_mask_dict[name] = torch.ones_like(mask_dict[name])
 
     # # Replace the weights in target model with the remain weights in source model
     # for name, param in source_model.named_parameters():
