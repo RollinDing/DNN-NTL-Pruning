@@ -7,6 +7,7 @@ import torchvision.models as models
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from torchvision import datasets
+from transformers import AutoModel
 
 class ResNetEncoder(nn.Module):
     def __init__(self, original_model):
@@ -87,16 +88,61 @@ def get_cifar10_data_loaders(download, shuffle=False, batch_size=256):
                             num_workers=10, drop_last=False, shuffle=False)
     return train_loader, test_loader
 
-    
+
+
+def transfer_weights(hf_layer, tv_layer):
+    """
+    Transfer weights from hf_layer to tv_layer if dimensions match.
+    """
+    with torch.no_grad():  # Ensure no gradients are computed during weight transfer
+        if hf_layer.weight.data.shape == tv_layer.weight.data.shape:
+            tv_layer.weight.data = hf_layer.weight.data.clone()
+            if hasattr(hf_layer, 'bias') and hf_layer.bias is not None and \
+               hasattr(tv_layer, 'bias') and tv_layer.bias is not None:
+                tv_layer.bias.data = hf_layer.bias.data.clone()
+        else:
+            print(f"Skipping layer due to mismatched dimensions: {hf_layer} -> {tv_layer}")
+
+
 if __name__ == "__main__":
     # Load and convert the pre-trained ResNet-18 model
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    original_model = models.resnet18(pretrained=True).to(device)
-    checkpoint = torch.load('base_models/resnet18-simclr-cifar10.tar', map_location=device)
-    resnet_encoder = ResNetEncoder(original_model)
-    resnet_classifier = ResNetClassifier(original_model)
+    tv_model = models.resnet18(pretrained=True).to(device)
+    # checkpoint = torch.load('base_models/resnet18-simclr-cifar10.tar', map_location=device)
+    # state_dict = checkpoint['state_dict']
 
-    optimizer = torch.optim.Adam(resnet_classifier.parameters(), lr=0.0003, weight_decay=0.0008)
+    # for k in list(state_dict.keys()):
+    #     if k.startswith('backbone.'):
+    #         if k.startswith('backbone') and not k.startswith('backbone.fc'):
+    #             # remove prefix
+    #             state_dict[k[len("backbone."):]] = state_dict[k]
+    #     del state_dict[k]
+
+    # log = original_model.load_state_dict(state_dict, strict=False)
+    # assert log.missing_keys == ['fc.weight', 'fc.bias']
+
+    hf_model = AutoModel.from_pretrained("edadaltocg/resnet50_simclr_cifar10")
+    # Example: Transfer the initial convolution and batch normalization
+    transfer_weights(hf_model.embedder.embedder.convolution, tv_model.conv1)
+    transfer_weights(hf_model.embedder.embedder.normalization, tv_model.bn1)
+
+    # Assuming similar naming and structure for bottleneck blocks
+    # You'll need to iterate through the Hugging Face model's blocks and transfer weights to the corresponding torchvision blocks
+    # This is a simplified example for illustration; adjust according to your model's structure
+    for hf_stage, tv_stage in zip(hf_model.encoder.stages, tv_model.layer1):
+        for hf_block, tv_block in zip(hf_stage.layers, tv_stage):
+            transfer_weights(hf_block.shortcut.convolution, tv_block.downsample[0])
+            transfer_weights(hf_block.shortcut.normalization, tv_block.downsample[1])
+            # Repeat for each sub-layer within the block
+    
+    exit()
+
+    resnet_encoder = ResNetEncoder(original_model)
+    # resnet_classifier = ResNetClassifier(original_model)
+    resnet_classifier = nn.Linear(2048, 10).to(device)
+
+    optimizer = torch.optim.Adam([param for name, param in resnet_encoder.named_parameters() if param.requires_grad]+
+                                     [param for name, param in resnet_classifier.named_parameters() if param.requires_grad], lr=0.001, weight_decay=0.008)
     criterion = torch.nn.CrossEntropyLoss().to(device)
 
     train_loader, test_loader = get_cifar10_data_loaders(download=True)

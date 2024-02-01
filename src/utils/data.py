@@ -41,7 +41,8 @@ def get_cifar_dataloader(args, ratio=1.0):
     )
 
     # Define the size of the subset
-    subset_size = int(45000 * ratio)# for example, 5000 samples
+    subset_size = int(len(train_dataset) * ratio)
+    print(f"Using the sample size of {subset_size}.")
 
     # Create a random subset for training
     indices = np.random.permutation(len(train_dataset))
@@ -450,19 +451,11 @@ def get_stl_dataloader(args, ratio=0.1):
         transforms.Resize(32),
         transforms.transforms.RandomHorizontalFlip(),
         transforms.transforms.ToTensor(),
-        transforms.transforms.Normalize(
-            mean=[0.4409, 0.4279, 0.3868],
-            std=[0.2683, 0.2610, 0.2687],
-        ),
     ])
 
     val_transform = transforms.transforms.Compose([
         transforms.Resize(32),
         transforms.transforms.ToTensor(),
-        transforms.transforms.Normalize(
-            mean=[0.4409, 0.4279, 0.3868],
-            std=[0.2683, 0.2610, 0.2687],
-        ),
     ])
 
     train_dataset = datasets.STL10(
@@ -473,8 +466,9 @@ def get_stl_dataloader(args, ratio=0.1):
     )
 
     # Define the size of the subset
-    subset_size = int(5000 * ratio)# for example, 5000 samples
-
+    subset_size = int(len(train_dataset)*ratio)
+    print(f"Using sample size of {subset_size}.")
+                      
     # Create a random subset for training
     indices = np.random.permutation(len(train_dataset))
     train_indices = indices[:subset_size]

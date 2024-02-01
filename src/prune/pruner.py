@@ -604,7 +604,7 @@ def load_base_model(model, model_name, source_domain, source_trainloader, source
         nepochs = 100
         model.to(device)    
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=1e-3, momentum=0.9)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
         # adjust the learning rate
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.1)
         criterion = torch.nn.CrossEntropyLoss()

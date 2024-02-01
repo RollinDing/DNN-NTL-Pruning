@@ -14,8 +14,9 @@ import os
 import pickle
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from prune.pruner import load_base_model
+from prune.ssl_model_pruning import load_ssl_model
 from models.encoders import ResNetEncoder, ResNetClassifier
+from prune.admm_encoder import ADMMEncoderPruner
 
 from utils.args import get_args
 from utils.data import *
@@ -171,6 +172,7 @@ def main():
     source_domain = args.source
     target_domain = args.target
     finetune_ratio = args.finetune_ratio
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Load the dataset
     if source_domain == 'mnist':
@@ -188,8 +190,8 @@ def main():
     elif source_domain == 'stl':
         source_trainloader, source_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
 
-    model = load_base_model(model, args.arch, source_domain, source_trainloader, source_testloader)
-    
+    model = load_ssl_model(args, model, device)
+
     # Load the target dataset
     if target_domain == 'mnist':
         target_trainloader, target_testloader = get_mnist_dataloader(args, ratio=finetune_ratio)
@@ -220,6 +222,9 @@ def main():
     resnet_encoder = torch.load(encoder_path)
     resnet_classifier = torch.load(classifier_path)
 
+    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=50, prune_percentage=0.98)
+    admm_pruner.mask_dict = mask_dict
+
     # admm_pruner = ADMMPruner(pruned_model, source_trainloader, target_trainloader, args)
 
     # mask_dict = torch.load(mask_path)
@@ -236,7 +241,7 @@ def main():
     print("Evaluate the model on source domain")
     source_encoder = deepcopy(resnet_encoder)
     source_classifier = deepcopy(resnet_classifier)
-    finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
+    # finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
     evaluate_sparse_encoder(source_encoder, source_classifier, mask_dict, source_testloader)
 
     print("Evaluate the model on target domain")
@@ -249,17 +254,15 @@ def main():
     # Training sample number
     train_sample_nums = [int(total_train_samples*ratio) for ratio in np.array([0.01, 0.05, 0.1, 0.2, 0.5, 1.0])]
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
     target_encoder.to(device)
     target_classifier.to(device)
     
     # build an all-one mask 
-    all_one_mask_dict = {}
-    for name, param in target_encoder.named_parameters():
-        if name in mask_dict:
-            all_one_mask_dict[name] = torch.ones_like(mask_dict[name])
-
-    # mask_dict = all_one_mask_dict
+    # all_one_mask_dict = {}
+    # for name, param in target_encoder.named_parameters():
+    #     if name in mask_dict:
+    #         all_one_mask_dict[name] = torch.ones_like(mask_dict[name])
 
     # # Replace the weights in target model with the remain weights in source model
     # for name, param in source_model.named_parameters():
@@ -276,7 +279,7 @@ def main():
         # Evaluate the transferability 
         encoder_copy = deepcopy(target_encoder)    
 
-        finetune_sparse_encoder(encoder_copy, target_classifier, mask_dict, subtrainloader, target_testloader, lr=1e-3)
+        finetune_sparse_encoder(encoder_copy, target_classifier, mask_dict, subtrainloader, target_testloader, lr=1e-4)
         evaluate_sparse_encoder(encoder_copy, target_classifier, mask_dict, target_testloader)
 
 if __name__ == "__main__":

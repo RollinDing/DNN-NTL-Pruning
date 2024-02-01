@@ -61,6 +61,9 @@ def main():
     elif args.arch == 'resnet18':
         model = torchvision.models.resnet18(pretrained=False)
         model.fc = nn.Linear(512, num_classes)
+    elif args.arch == 'resnet50':
+        model = torchvision.models.resnet50(pretrained=False)
+        model.fc = nn.Linear(2048, num_classes)
 
     source_domain = args.source
     target_domain = args.target
@@ -120,12 +123,13 @@ def main():
     resnet_classifier = ResNetClassifier(model)
     # Initialize the ADMM pruner
     admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=50, prune_percentage=0.98)
+    
+    admm_pruner.finetune_model(source_trainloader)
     # admm_pruner.initialize_target_classifier()
-    admm_pruner.finetune_model(source_trainloader, nepochs=50, lr=1e-4)
     # Evaluate the model
     admm_pruner.evaluate(source_testloader)
     admm_pruner.evaluate(target_testloader)
-
+    
     exit()
     # Run the ADMM algorithm
     admm_pruner.run_admm()
@@ -146,4 +150,6 @@ def main():
 
 
 if __name__ == "__main__":
+    torch.manual_seed(1)
+    np.random.seed(1)
     main()

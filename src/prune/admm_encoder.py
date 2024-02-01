@@ -70,14 +70,15 @@ class ADMMEncoderPruner:
         print(f'Accuracy on dataset: {correct / total}')
         return correct / total
 
-    def finetune_model(self, dataloader, nepochs=30, lr=1e-3):
+    def finetune_model(self, dataloader, nepochs=30, lr=1e-3, weight_decay=0.0008):
         # Fine-tuning the model on both source and target dataset
         self.encoder.train()
 
         # Only fine-tune the unfrozen parameters
         # optimizer = torch.optim.SGD([param for name, param in self.model.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
         optimizer = torch.optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad]+
-                                     [param for name, param in self.source_classifier.named_parameters() if param.requires_grad], lr=lr, weight_decay=0.0008)
+                                     [param for name, param in self.source_classifier.named_parameters() if param.requires_grad], lr=lr, weight_decay=weight_decay)
+        
         criterion = torch.nn.CrossEntropyLoss()
 
         for epoch in range(nepochs):
@@ -274,14 +275,14 @@ class ADMMEncoderPruner:
 
                 # The loss also contains the variance of the features in both domains
                 u = 1
-                v = 1e3
-                loss = source_loss - alpha*torch.clamp(target_loss, max=10) + u*torch.sum(torch.var(source_features, dim=0)) - v*torch.sum(torch.var(target_features, dim=0))
+                v = 1e2
+                # loss = source_loss - alpha*torch.clamp(target_loss, max=10) + u*torch.sum(torch.var(source_features, dim=0)) - v*torch.sum(torch.var(target_features, dim=0))
 
                 # The loss contains the dot product (at the second dim) of the features between two domains (to make the feature o
 
                 # loss = source_loss  - alpha*torch.clamp(target_loss, max=10) # + 1e-2 * torch.sum(source_features * target_features)
 
-                # loss = source_loss + torch.log(1 + alpha*source_loss/target_loss)
+                loss = source_loss + torch.log(1 + alpha*source_loss/target_loss)  + u*torch.sum(torch.var(source_features, dim=0)) - v*torch.sum(torch.var(target_features, dim=0))
                 # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
 
                 # Compute ADMM regularization term with detached Z and U
