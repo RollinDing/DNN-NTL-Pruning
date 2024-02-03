@@ -192,11 +192,7 @@ class ADMMEncoderPruner:
                     break
 
     def update_weights(self, Z_dict, U_dict, rho, alpha):
-        # Update model weights using ADMM loss
-        loss_sum = 0
-        admm_loss_sum = 0
-        target_loss_sum = 0
-        sample_num = 0
+
         
         # Iteratively update the model weights with ntl, on target dataset and on source dataset
         encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.lr, weight_decay=0.0008)
@@ -208,6 +204,15 @@ class ADMMEncoderPruner:
         criterion = nn.CrossEntropyLoss()
 
         for epoch in range(self.nepochs):
+            # Update model weights using ADMM loss
+            loss_sum = 0
+            admm_loss_sum = 0
+            source_loss_sum = 0
+            target_loss_sum = 0
+            sample_num = 0
+            src_var = 0
+            tgt_var = 0
+
             for (source_input, source_labels), (target_input, target_labels) in zip(self.source_loader, self.target_loader):
                 # make sure the source and target has the same number of samples
                 if source_input.size(0) > target_input.size(0):
@@ -269,20 +274,60 @@ class ADMMEncoderPruner:
                 source_loss = criterion(source_outputs, source_labels)
                 target_loss = criterion(target_outputs, target_labels)
 
+                loss = source_loss - alpha*torch.clamp(target_loss, max=10) 
+
                 # normalize features 
                 source_features = F.normalize(source_features, p=2, dim=1)
                 target_features = F.normalize(target_features, p=2, dim=1)
 
-                # The loss also contains the variance of the features in both domains
-                u = 1
-                v = 1e2
-                # loss = source_loss - alpha*torch.clamp(target_loss, max=10) + u*torch.sum(torch.var(source_features, dim=0)) - v*torch.sum(torch.var(target_features, dim=0))
 
+                # a value consider the inner class variance of the features
+                cond_source_features = 0
+                for i in range(10):
+                    cond_source_features += torch.sum(torch.var(source_features[source_labels == i], dim=0))
+                
+                cond_target_variance = 0
+                for i in range(10):
+                    cond_target_variance += torch.sum(torch.var(target_features[target_labels == i], dim=0))
+
+                # The loss also contains the variance of the features in both domains
+                # u = 1e2
+                # v = 1e3
+                # loss += u*torch.sum(torch.var(source_features, dim=0)) - v* torch.sum(torch.var(target_features, dim=0))
+                # loss +=  u*cond_source_features - v* cond_target_variance
                 # The loss contains the dot product (at the second dim) of the features between two domains (to make the feature o
+
 
                 # loss = source_loss  - alpha*torch.clamp(target_loss, max=10) # + 1e-2 * torch.sum(source_features * target_features)
 
-                loss = source_loss + torch.log(1 + alpha*source_loss/target_loss)  + u*torch.sum(torch.var(source_features, dim=0)) - v*torch.sum(torch.var(target_features, dim=0))
+                # a regularization term focus on the average inter-class feature distance and intra class feature distance of the target domain. (Euclidean distance)
+                    
+                source_inter_class_distance = 0
+                for i in range(10):
+                    for j in range(i+1, 10):
+                        source_inter_class_distance += torch.sum((torch.mean(source_features[source_labels == i], dim=0) - torch.mean(source_features[source_labels == j], dim=0))**2)
+
+                target_inter_class_distance = 0
+                for i in range(10):
+                    for j in range(i+1, 10):
+                        target_inter_class_distance += torch.sum((torch.mean(target_features[target_labels == i], dim=0) - torch.mean(target_features[target_labels == j], dim=0))**2)
+
+                source_intra_class_distance = 0
+                for i in range(10):
+                    source_intra_class_distance += torch.sum(torch.var(source_features[source_labels == i], dim=0))
+                
+                target_intra_class_distance = 0
+                for i in range(10):
+                    target_intra_class_distance += torch.sum(torch.var(target_features[target_labels == i], dim=0))
+
+                inter_class_distance = target_inter_class_distance - source_inter_class_distance
+                intra_class_distance = target_intra_class_distance - source_intra_class_distance 
+                
+                loss += 1e0 * inter_class_distance - 1e0 * intra_class_distance
+                
+                # cos_sim = torch.sum(source_features * target_features, dim=1)
+                # loss = source_loss - alpha*torch.clamp(target_loss, max=10) + 10*cos_sim.mean()
+                # loss = source_loss + torch.log(1 + alpha*source_loss/target_loss)  + u*torch.sum(torch.var(source_features, dim=0)) - v*torch.sum(torch.var(target_features, dim=0))
                 # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
 
                 # Compute ADMM regularization term with detached Z and U
@@ -303,9 +348,12 @@ class ADMMEncoderPruner:
 
                 # Record the admm loss
                 loss_sum += loss.item()
+                source_loss_sum += source_loss.item()
                 target_loss_sum += target_loss.item()
                 admm_loss_sum += rho/2 * admm_reg.item()
                 sample_num += source_input.size(0)
+                src_var += cond_source_features
+                tgt_var += cond_target_variance
 
             # # how many percentage parameters are adjusted 
             # changed = 0
@@ -316,8 +364,10 @@ class ADMMEncoderPruner:
             #         total += param.numel()
             # print(f"Percentage of changed parameters: {changed/total}")
 
-            # Print the admm loss
-            logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num}; task loss: {loss_sum / sample_num}; target loss: {target_loss_sum / sample_num}')
+            # Print the admm loss set in 2 demical values
+            # logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}')
+            logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}; inter class distance: {inter_class_distance:.4f}; intra class distance: {intra_class_distance:.4f}')
+
             # logging.info(f"Epoch {epoch}: Source loss: {source_loss.item()}")
             # logging.info(f"Epoch {epoch}: Target loss: {target_loss.item()}")
 
@@ -439,7 +489,7 @@ def main():
     resnet_encoder = ResNetEncoder(model)
     resnet_classifier = ResNetClassifier(model)
     # Initialize the ADMM pruner
-    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=50, prune_percentage=0.98)
+    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
     admm_pruner.initialize_target_classifier()
     # Evaluate the model
     admm_pruner.evaluate(source_testloader)

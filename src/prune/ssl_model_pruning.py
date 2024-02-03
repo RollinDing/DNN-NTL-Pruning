@@ -122,7 +122,7 @@ def main():
     resnet_encoder = ResNetEncoder(model)
     resnet_classifier = ResNetClassifier(model)
     # Initialize the ADMM pruner
-    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=50, prune_percentage=0.98)
+    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
     
     admm_pruner.finetune_model(source_trainloader)
     # admm_pruner.initialize_target_classifier()
