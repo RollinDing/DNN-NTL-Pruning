@@ -22,7 +22,6 @@ from models.encoders import ResNetEncoder, ResNetClassifier
 from prune.pruner import load_base_model
 from utils.args import get_args
 from utils.data import *
-from itertools import cycle
 
 class ADMMEncoderPruner:
     def __init__(self, encoder, classifier, source_loader, target_loader, args, prune_percentage=0.9, source_perf_threshold=0.9, max_iterations=30):    
@@ -291,9 +290,9 @@ class ADMMEncoderPruner:
                     cond_target_variance += torch.sum(torch.var(target_features[target_labels == i], dim=0))
 
                 # The loss also contains the variance of the features in both domains
-                # u = 1e2
-                # v = 1e3
-                # loss += u*torch.sum(torch.var(source_features, dim=0)) - v* torch.sum(torch.var(target_features, dim=0))
+                u = 1e0
+                v = 1e3
+                loss += u*torch.sum(torch.var(source_features, dim=0)) - v* torch.sum(torch.var(target_features, dim=0))
                 # loss +=  u*cond_source_features - v* cond_target_variance
                 # The loss contains the dot product (at the second dim) of the features between two domains (to make the feature o
 
@@ -302,28 +301,28 @@ class ADMMEncoderPruner:
 
                 # a regularization term focus on the average inter-class feature distance and intra class feature distance of the target domain. (Euclidean distance)
                     
-                source_inter_class_distance = 0
-                for i in range(10):
-                    for j in range(i+1, 10):
-                        source_inter_class_distance += torch.sum((torch.mean(source_features[source_labels == i], dim=0) - torch.mean(source_features[source_labels == j], dim=0))**2)
+                # source_inter_class_distance = 0
+                # for i in range(10):
+                #     for j in range(i+1, 10):
+                #         source_inter_class_distance += torch.sum((torch.mean(source_features[source_labels == i], dim=0) - torch.mean(source_features[source_labels == j], dim=0))**2)
 
-                target_inter_class_distance = 0
-                for i in range(10):
-                    for j in range(i+1, 10):
-                        target_inter_class_distance += torch.sum((torch.mean(target_features[target_labels == i], dim=0) - torch.mean(target_features[target_labels == j], dim=0))**2)
+                # target_inter_class_distance = 0
+                # for i in range(10):
+                #     for j in range(i+1, 10):
+                #         target_inter_class_distance += torch.sum((torch.mean(target_features[target_labels == i], dim=0) - torch.mean(target_features[target_labels == j], dim=0))**2)
 
-                source_intra_class_distance = 0
-                for i in range(10):
-                    source_intra_class_distance += torch.sum(torch.var(source_features[source_labels == i], dim=0))
+                # source_intra_class_distance = 0
+                # for i in range(10):
+                #     source_intra_class_distance += torch.sum(torch.var(source_features[source_labels == i], dim=0))
                 
-                target_intra_class_distance = 0
-                for i in range(10):
-                    target_intra_class_distance += torch.sum(torch.var(target_features[target_labels == i], dim=0))
+                # target_intra_class_distance = 0
+                # for i in range(10):
+                #     target_intra_class_distance += torch.sum(torch.var(target_features[target_labels == i], dim=0))
 
-                inter_class_distance = target_inter_class_distance - source_inter_class_distance
-                intra_class_distance = target_intra_class_distance - source_intra_class_distance 
+                # inter_class_distance = target_inter_class_distance - source_inter_class_distance
+                # intra_class_distance = target_intra_class_distance - source_intra_class_distance 
                 
-                loss += 1e0 * inter_class_distance - 1e0 * intra_class_distance
+                # loss += 1e0 * inter_class_distance - 1e0 * intra_class_distance
                 
                 # cos_sim = torch.sum(source_features * target_features, dim=1)
                 # loss = source_loss - alpha*torch.clamp(target_loss, max=10) + 10*cos_sim.mean()
@@ -365,8 +364,8 @@ class ADMMEncoderPruner:
             # print(f"Percentage of changed parameters: {changed/total}")
 
             # Print the admm loss set in 2 demical values
-            # logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}')
-            logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}; inter class distance: {inter_class_distance:.4f}; intra class distance: {intra_class_distance:.4f}')
+            logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}')
+            # logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}; inter class distance: {inter_class_distance:.4f}; intra class distance: {intra_class_distance:.4f}')
 
             # logging.info(f"Epoch {epoch}: Source loss: {source_loss.item()}")
             # logging.info(f"Epoch {epoch}: Target loss: {target_loss.item()}")
