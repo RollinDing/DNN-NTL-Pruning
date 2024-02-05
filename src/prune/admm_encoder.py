@@ -23,6 +23,49 @@ from prune.pruner import load_base_model
 from utils.args import get_args
 from utils.data import *
 
+import torch
+import torch.nn.functional as F
+
+def sfda_multiclass_regularization_loss(outputs, targets, num_classes, data_type, lambda_reg=0.01):
+    """
+    SFDA regularization loss for multi-class classification.
+    
+    outputs: model predictions, shape (batch_size, num_features)
+    targets: ground truth labels, shape (batch_size,)
+    num_classes: number of classes in the classification task
+    lambda_reg: regularization strength
+    """
+    device = outputs.device
+    class_means = []
+    within_class_scatter = 0.0
+    
+    # Calculate means for each class and within-class scatter
+    for class_id in range(num_classes):
+        class_indices = targets == class_id
+        outputs_class = outputs[class_indices]
+        
+        if outputs_class.size(0) > 0:  # Check if the class is present in the batch
+            class_mean = torch.mean(outputs_class, dim=0)
+            within_class_scatter += torch.mean((outputs_class - class_mean).pow(2))
+            class_means.append(class_mean)
+        else:
+            class_means.append(torch.zeros(outputs.shape[1], device=device))
+    
+    class_means = torch.stack(class_means)  # Shape: (num_classes, num_features)
+    
+    # Compute total mean for between-class scatter
+    total_mean = torch.mean(class_means, dim=0)
+    
+    # Compute between-class scatter
+    between_class_scatter = torch.mean((class_means - total_mean).pow(2))
+    
+    # Regularization term: Minimize within-class scatter, maximize between-class scatter
+    if data_type == 'target':
+        reg_loss = lambda_reg * ( between_class_scatter/within_class_scatter)
+    elif data_type == 'source':
+        reg_loss = lambda_reg * ( within_class_scatter/between_class_scatter)
+    return reg_loss
+
 class ADMMEncoderPruner:
     def __init__(self, encoder, classifier, source_loader, target_loader, args, prune_percentage=0.9, source_perf_threshold=0.9, max_iterations=30):    
         self.source_loader = source_loader
@@ -196,13 +239,13 @@ class ADMMEncoderPruner:
         # Iteratively update the model weights with ntl, on target dataset and on source dataset
         encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.lr, weight_decay=0.0008)
         # Build an surrogate encoder to find the real target loss
-        target_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
+        target_optimizer = optim.Adam([param for name, param in self.target_classifier.named_parameters() if param.requires_grad], lr=1e-2, weight_decay=0.0008)
         source_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
        
         # Initialize the loss function
         criterion = nn.CrossEntropyLoss()
 
-        for epoch in range(self.nepochs):
+        for epoch in range(1):
             # Update model weights using ADMM loss
             loss_sum = 0
             admm_loss_sum = 0
@@ -275,9 +318,19 @@ class ADMMEncoderPruner:
 
                 loss = source_loss - alpha*torch.clamp(target_loss, max=10) 
 
-                # normalize features 
-                source_features = F.normalize(source_features, p=2, dim=1)
-                target_features = F.normalize(target_features, p=2, dim=1)
+                # # normalize features 
+                # source_features = F.normalize(source_features, p=2, dim=1)
+                # target_features = F.normalize(target_features, p=2, dim=1)
+
+
+                # Add noise to feature space 
+                # source_features = source_features + 0.1*torch.randn_like(source_features)
+                # target_features = target_features + 0.1*torch.randn_like(target_features)
+
+                # source_outputs = self.source_classifier(source_features)
+                # target_outputs = self.target_classifier(target_features)
+
+                # loss = criterion(source_outputs, source_labels) - alpha*torch.clamp(criterion(target_outputs, target_labels), max=10)
 
 
                 # a value consider the inner class variance of the features
@@ -289,14 +342,17 @@ class ADMMEncoderPruner:
                 for i in range(10):
                     cond_target_variance += torch.sum(torch.var(target_features[target_labels == i], dim=0))
 
+                # SFDA loss 
+                loss += sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=1e3)
+                # loss += sfda_multiclass_regularization_loss(source_features, source_labels, 10, 'source', lambda_reg=1e0)
+
                 # The loss also contains the variance of the features in both domains
-                u = 1e0
-                v = 1e3
-                loss += u*torch.sum(torch.var(source_features, dim=0)) - v* torch.sum(torch.var(target_features, dim=0))
+                # u = 1e0
+                # v = 1e3
+                # loss += u*torch.sum(torch.var(source_features, dim=0)) - v* torch.sum(torch.var(target_features, dim=0))
                 # loss +=  u*cond_source_features - v* cond_target_variance
+
                 # The loss contains the dot product (at the second dim) of the features between two domains (to make the feature o
-
-
                 # loss = source_loss  - alpha*torch.clamp(target_loss, max=10) # + 1e-2 * torch.sum(source_features * target_features)
 
                 # a regularization term focus on the average inter-class feature distance and intra class feature distance of the target domain. (Euclidean distance)
@@ -322,13 +378,17 @@ class ADMMEncoderPruner:
                 # inter_class_distance = target_inter_class_distance - source_inter_class_distance
                 # intra_class_distance = target_intra_class_distance - source_intra_class_distance 
                 
-                # loss += 1e0 * inter_class_distance - 1e0 * intra_class_distance
+                # loss += 1e1 * target_inter_class_distance - 1e1 * target_intra_class_distance - 1e3*torch.sum(torch.var(target_features, dim=0))
                 
                 # cos_sim = torch.sum(source_features * target_features, dim=1)
                 # loss = source_loss - alpha*torch.clamp(target_loss, max=10) + 10*cos_sim.mean()
                 # loss = source_loss + torch.log(1 + alpha*source_loss/target_loss)  + u*torch.sum(torch.var(source_features, dim=0)) - v*torch.sum(torch.var(target_features, dim=0))
+                
+                # The loss regularization penalize the gradients of the model on target domain
+                # grad_term = 1e-1 * torch.sum(torch.abs(torch.autograd.grad(target_loss, [param for name, param in self.encoder.named_parameters() if param.requires_grad], create_graph=True)[0]))
+                # loss += grad_term
+                
                 # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
-
                 # Compute ADMM regularization term with detached Z and U
                 admm_reg = sum([torch.norm((param - Z_dict[name].detach() + U_dict[name].detach()))
                                 for name, param in self.encoder.named_parameters() if param.requires_grad])
@@ -337,7 +397,8 @@ class ADMMEncoderPruner:
                 admm_loss = loss + rho/2 * admm_reg
                 admm_loss.backward()
                 encoder_optimizer.step()
-
+                
+                
                 # apply the mask to the model
                 for name, param in self.encoder.named_parameters():
                     if name in self.mask_dict:
@@ -364,8 +425,9 @@ class ADMMEncoderPruner:
             # print(f"Percentage of changed parameters: {changed/total}")
 
             # Print the admm loss set in 2 demical values
-            logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}')
-            # logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}; inter class distance: {inter_class_distance:.4f}; intra class distance: {intra_class_distance:.4f}')
+            # logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}; grad term: {grad_term.item()}')
+            # logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}; inter class distance: {target_inter_class_distance:.4f}; intra class distance: {target_intra_class_distance:.4f}')
+            logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f};')
 
             # logging.info(f"Epoch {epoch}: Source loss: {source_loss.item()}")
             # logging.info(f"Epoch {epoch}: Target loss: {target_loss.item()}")
@@ -488,7 +550,7 @@ def main():
     resnet_encoder = ResNetEncoder(model)
     resnet_classifier = ResNetClassifier(model)
     # Initialize the ADMM pruner
-    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
+    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=1000, prune_percentage=0.99)
     admm_pruner.initialize_target_classifier()
     # Evaluate the model
     admm_pruner.evaluate(source_testloader)
@@ -516,5 +578,4 @@ if __name__ == '__main__':
     # Set the random seed for reproducible experiments
     torch.manual_seed(1234)
     np.random.seed(1234)
-
     main()

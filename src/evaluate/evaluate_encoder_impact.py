@@ -192,19 +192,19 @@ def main():
     
     # Load the target dataset
     if target_domain == 'mnist':
-        target_trainloader, target_testloader = get_mnist_dataloader(args, ratio=finetune_ratio)
+        target_trainloader, target_testloader = get_mnist_dataloader(args, ratio=1)
     elif target_domain == 'cifar10':
-        target_trainloader, target_testloader = get_cifar_dataloader(args, ratio=finetune_ratio)
+        target_trainloader, target_testloader = get_cifar_dataloader(args, ratio=1)
     elif target_domain == 'usps':
-        target_trainloader, target_testloader = get_usps_dataloader(args, ratio=finetune_ratio)
+        target_trainloader, target_testloader = get_usps_dataloader(args, ratio=1)
     elif target_domain == 'svhn':
-        target_trainloader, target_testloader = get_svhn_dataloader(args, ratio=finetune_ratio)
+        target_trainloader, target_testloader = get_svhn_dataloader(args, ratio=1)
     elif target_domain == 'mnistm':
-        target_trainloader, target_testloader = get_mnistm_dataloader(args, ratio=finetune_ratio)
+        target_trainloader, target_testloader = get_mnistm_dataloader(args, ratio=1)
     elif target_domain == 'syn':
-        target_trainloader, target_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
+        target_trainloader, target_testloader = get_syn_dataloader(args, ratio=1)
     elif target_domain == 'stl':
-        target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
+        target_trainloader, target_testloader = get_stl_dataloader(args, ratio=1)
 
     # evaluate_transferability_with_ratio(model, target_trainloader, target_testloader)
     resnet_encoder = ResNetEncoder(model)
@@ -247,7 +247,7 @@ def main():
     total_train_samples = len(target_trainloader.dataset)
 
     # Training sample number
-    train_sample_nums = [int(total_train_samples*ratio) for ratio in np.array([0.01, 0.05, 0.1, 0.2, 0.5, 1.0])]
+    train_sample_nums = [int(total_train_samples*ratio) for ratio in np.array([0.001, 0.002, 0.005, 0.008, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0])]
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     target_encoder.to(device)
@@ -276,7 +276,7 @@ def main():
         # Evaluate the transferability 
         encoder_copy = deepcopy(target_encoder)    
 
-        finetune_sparse_encoder(encoder_copy, target_classifier, mask_dict, subtrainloader, target_testloader, lr=1e-3)
+        finetune_sparse_encoder(encoder_copy, target_classifier, mask_dict, subtrainloader, target_testloader, lr=1e-4)
         evaluate_sparse_encoder(encoder_copy, target_classifier, mask_dict, target_testloader)
 
 if __name__ == "__main__":

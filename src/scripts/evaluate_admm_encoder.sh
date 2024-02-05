@@ -2,7 +2,7 @@
 
 arch='resnet18'
 source='mnist'
-target='usps'
+target='cifar10'
 rho=0.01
 alpha=0.001
 lr=1e-3
