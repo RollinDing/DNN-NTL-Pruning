@@ -7,6 +7,12 @@ def get_args():
         and callable(models.__dict__[name]))
 
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
+
+    ############################# settings for pruning ###################################
+    parser.add_argument('--prune-method', choices=['admm-ntl', 'admm-lda'], 
+                        default='admm-lda', 
+                        help='pruning method for model non-transferability')
+
     ############################# required settings ################################
     parser.add_argument('data', metavar='DIR',
                         help='path to dataset')
@@ -62,6 +68,7 @@ def get_args():
     parser.add_argument('--pretrained', default=True, type=bool, help='pretrained model path')
     parser.add_argument('--gpu', default=None, type=int,
                         help='GPU id to use.')
+
 
     args = parser.parse_args()
     return args

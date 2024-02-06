@@ -149,6 +149,11 @@ def evaluate_transferability(model, target_trainloader, target_testloader):
 def main():
     # load args 
     args = get_args()
+    # Set random seed 
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    
     num_classes = 10
     if args.arch == 'vgg11':
         # Load the pretrained model 
@@ -174,10 +179,13 @@ def main():
     finetune_ratio = args.finetune_ratio
 
     # Create the logger 
-    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/ntl+lda')
+    if args.prune_method == 'admm-ntl':
+        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/ntl/{args.seed}')
+    elif args.prune_method == 'admm-lda':
+        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/lda/{args.seed}')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-
+    
     log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}.log')
     # The log file should clear every time
     logging.basicConfig(filename=log_path, filemode='w', level=logging.INFO)
@@ -298,7 +306,4 @@ def main():
         logging.info(f'Data ratio {ratio}, Data volume {train_sample_num},  NTL+LDA transfer from {source_domain} to {target_domain} dataset, the best accuracy is {best_acc}')
 
 if __name__ == "__main__":
-    # Set the random seed for reproducible experiments
-    torch.manual_seed(1)
-    np.random.seed(1)
     main()

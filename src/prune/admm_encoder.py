@@ -25,6 +25,7 @@ from utils.data import *
 
 import torch
 import torch.nn.functional as F
+import random
 
 def sfda_multiclass_regularization_loss(outputs, targets, num_classes, data_type, lambda_reg=0.01):
     """
@@ -234,8 +235,6 @@ class ADMMEncoderPruner:
                     break
 
     def update_weights(self, Z_dict, U_dict, rho, alpha):
-
-        
         # Iteratively update the model weights with ntl, on target dataset and on source dataset
         encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.lr, weight_decay=0.0008)
         # Build an surrogate encoder to find the real target loss
@@ -269,40 +268,6 @@ class ADMMEncoderPruner:
                 target_input = target_input.to(self.device)
                 target_labels = target_labels.to(self.device)
 
-                # # Update the encoder according to the target domain
-                # target_optimizer.zero_grad()
-
-                # # forward + backward + optimize
-                # target_features = self.encoder(target_input, self.mask_dict)
-                # target_outputs = self.target_classifier(target_features)
-                # target_loss = criterion(target_outputs, target_labels)
-
-                # target_loss.backward()
-                # target_optimizer.step()
-
-                # # apply the mask to the model
-                # for name, param in self.encoder.named_parameters():
-                #     if name in self.mask_dict:
-                #         param.data = param.data * self.mask_dict[name]
-                #         # set the gradient to zero
-                #         param.grad = param.grad * self.mask_dict[name]
-
-                # source_optimizer.zero_grad()
-                # # forward + backward + optimize
-                # source_features = self.encoder(source_input, self.mask_dict)
-                # source_outputs = self.source_classifier(source_features)
-                # source_loss = criterion(source_outputs, source_labels)
-
-                # source_loss.backward()
-                # source_optimizer.step()
-
-                # # apply the mask to the model
-                # for name, param in self.encoder.named_parameters():
-                #     if name in self.mask_dict:
-                #         param.data = param.data * self.mask_dict[name]
-                #         # set the gradient to zero
-                #         param.grad = param.grad * self.mask_dict[name]
-
                 encoder_optimizer.zero_grad()
 
                 # The architecture-specific forward pass 
@@ -318,21 +283,6 @@ class ADMMEncoderPruner:
 
                 loss = source_loss - alpha*torch.clamp(target_loss, max=10) 
 
-                # # normalize features 
-                # source_features = F.normalize(source_features, p=2, dim=1)
-                # target_features = F.normalize(target_features, p=2, dim=1)
-
-
-                # Add noise to feature space 
-                # source_features = source_features + 0.1*torch.randn_like(source_features)
-                # target_features = target_features + 0.1*torch.randn_like(target_features)
-
-                # source_outputs = self.source_classifier(source_features)
-                # target_outputs = self.target_classifier(target_features)
-
-                # loss = criterion(source_outputs, source_labels) - alpha*torch.clamp(criterion(target_outputs, target_labels), max=10)
-
-
                 # a value consider the inner class variance of the features
                 cond_source_features = 0
                 for i in range(10):
@@ -343,50 +293,10 @@ class ADMMEncoderPruner:
                     cond_target_variance += torch.sum(torch.var(target_features[target_labels == i], dim=0))
 
                 # SFDA loss 
-                loss += sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=1e3)
-                # loss += sfda_multiclass_regularization_loss(source_features, source_labels, 10, 'source', lambda_reg=1e0)
-
-                # The loss also contains the variance of the features in both domains
-                # u = 1e0
-                # v = 1e3
-                # loss += u*torch.sum(torch.var(source_features, dim=0)) - v* torch.sum(torch.var(target_features, dim=0))
-                # loss +=  u*cond_source_features - v* cond_target_variance
-
-                # The loss contains the dot product (at the second dim) of the features between two domains (to make the feature o
-                # loss = source_loss  - alpha*torch.clamp(target_loss, max=10) # + 1e-2 * torch.sum(source_features * target_features)
-
-                # a regularization term focus on the average inter-class feature distance and intra class feature distance of the target domain. (Euclidean distance)
-                    
-                # source_inter_class_distance = 0
-                # for i in range(10):
-                #     for j in range(i+1, 10):
-                #         source_inter_class_distance += torch.sum((torch.mean(source_features[source_labels == i], dim=0) - torch.mean(source_features[source_labels == j], dim=0))**2)
-
-                # target_inter_class_distance = 0
-                # for i in range(10):
-                #     for j in range(i+1, 10):
-                #         target_inter_class_distance += torch.sum((torch.mean(target_features[target_labels == i], dim=0) - torch.mean(target_features[target_labels == j], dim=0))**2)
-
-                # source_intra_class_distance = 0
-                # for i in range(10):
-                #     source_intra_class_distance += torch.sum(torch.var(source_features[source_labels == i], dim=0))
-                
-                # target_intra_class_distance = 0
-                # for i in range(10):
-                #     target_intra_class_distance += torch.sum(torch.var(target_features[target_labels == i], dim=0))
-
-                # inter_class_distance = target_inter_class_distance - source_inter_class_distance
-                # intra_class_distance = target_intra_class_distance - source_intra_class_distance 
-                
-                # loss += 1e1 * target_inter_class_distance - 1e1 * target_intra_class_distance - 1e3*torch.sum(torch.var(target_features, dim=0))
-                
-                # cos_sim = torch.sum(source_features * target_features, dim=1)
-                # loss = source_loss - alpha*torch.clamp(target_loss, max=10) + 10*cos_sim.mean()
-                # loss = source_loss + torch.log(1 + alpha*source_loss/target_loss)  + u*torch.sum(torch.var(source_features, dim=0)) - v*torch.sum(torch.var(target_features, dim=0))
-                
-                # The loss regularization penalize the gradients of the model on target domain
-                # grad_term = 1e-1 * torch.sum(torch.abs(torch.autograd.grad(target_loss, [param for name, param in self.encoder.named_parameters() if param.requires_grad], create_graph=True)[0]))
-                # loss += grad_term
+                if self.args.prune_method == 'admm-lda':
+                    loss += sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=1e3)
+                elif self.args.prune_method == 'admm-ntl':
+                    loss = loss
                 
                 # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
                 # Compute ADMM regularization term with detached Z and U
@@ -425,8 +335,6 @@ class ADMMEncoderPruner:
             # print(f"Percentage of changed parameters: {changed/total}")
 
             # Print the admm loss set in 2 demical values
-            # logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}; grad term: {grad_term.item()}')
-            # logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f}; inter class distance: {target_inter_class_distance:.4f}; intra class distance: {target_intra_class_distance:.4f}')
             logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f};')
 
             # logging.info(f"Epoch {epoch}: Source loss: {source_loss.item()}")
@@ -471,11 +379,15 @@ class ADMMEncoderPruner:
             if sparsity > self.prune_percentage:
                 break
 
-
-
 def main():
     # load args 
     args = get_args()
+    # Set the global random seed 
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+
     num_classes = 10
     if args.arch == 'vgg11':
         # Load the pretrained model 
@@ -499,7 +411,8 @@ def main():
     finetune_ratio = args.finetune_ratio
 
     # Create the logger 
-    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}')
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/{args.prune_method}/{args.seed}')
+    print("Creating log directory: ", log_dir)
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
@@ -560,22 +473,20 @@ def main():
     admm_pruner.run_admm()
 
     # Create the directory to save the model
-    model_dir = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/{args.arch}/{source_domain}_to_{target_domain}')
+    model_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/'
+    model_dir = os.path.join(os.path.dirname(__file__), '../..', model_path)
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
 
     # save the ADMM pruner as a pickle file
-    with open(f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl', 'wb') as f:
-        pickle.dump(admm_pruner, f)
+    # with open(f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl', 'wb') as f:
+    #     pickle.dump(admm_pruner, f)
 
     # Save the pruned model and masks
-    torch.save(admm_pruner.encoder, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_encoder.pth')
-    torch.save(admm_pruner.source_classifier, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_source_classifier.pth')
-    torch.save(admm_pruner.mask_dict, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_mask.pth')
+    torch.save(admm_pruner.encoder, model_path + '/admm_encoder.pth')
+    torch.save(admm_pruner.source_classifier, model_path + '/admm_source_classifier.pth')
+    torch.save(admm_pruner.mask_dict, model_path + '/admm_mask.pth')
 
 
 if __name__ == '__main__':
-    # Set the random seed for reproducible experiments
-    torch.manual_seed(1234)
-    np.random.seed(1234)
     main()
