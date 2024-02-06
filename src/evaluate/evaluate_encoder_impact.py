@@ -87,6 +87,7 @@ def evaluate_sparse_encoder(encoder, classifier, mask_dict, testloader):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
     print(f"Evaluate Accuracy: {correct/total}")
+    return correct/total
 
 def evaluate_transferability_with_ratio(model, target_trainloader, target_testloader):
     # Evaluate the model transferability with different number of fine-tuning samples
@@ -172,6 +173,21 @@ def main():
     target_domain = args.target
     finetune_ratio = args.finetune_ratio
 
+    # Create the logger 
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/ntl+lda')
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}.log')
+    # The log file should clear every time
+    logging.basicConfig(filename=log_path, filemode='w', level=logging.INFO)
+    # Log the time 
+    logging.info(time.asctime(time.localtime(time.time())))
+    # Log the args
+    logging.info(args)
+    # Log the source and target domain
+    logging.info(f'ADMM: {source_domain} to {target_domain}')
+
     # Load the dataset
     if source_domain == 'mnist':
         source_trainloader, source_testloader = get_mnist_dataloader(args, ratio=finetune_ratio)
@@ -247,7 +263,8 @@ def main():
     total_train_samples = len(target_trainloader.dataset)
 
     # Training sample number
-    train_sample_nums = [int(total_train_samples*ratio) for ratio in np.array([0.001, 0.002, 0.005, 0.008, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0])]
+    ratios = np.array([0.0001, 0.001, 0.002, 0.005, 0.008, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0])
+    train_sample_nums = [int(total_train_samples*ratio) for ratio in ratios]
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     target_encoder.to(device)
@@ -267,7 +284,7 @@ def main():
     #         target_model.state_dict()[name].data = param.data * mask_dict[name] + target_model.state_dict()[name].data * (1 - mask_dict[name])
 
     # For each train sample num, randomly select the samples and evaluate the transferability
-    for train_sample_num in train_sample_nums:
+    for train_sample_num, ratio in zip(train_sample_nums, ratios):
         print(f"Train sample num: {train_sample_num}")
         # Randomly select the samples
         indices = np.random.choice(total_train_samples, train_sample_num, replace=False)
@@ -277,7 +294,8 @@ def main():
         encoder_copy = deepcopy(target_encoder)    
 
         finetune_sparse_encoder(encoder_copy, target_classifier, mask_dict, subtrainloader, target_testloader, lr=1e-4)
-        evaluate_sparse_encoder(encoder_copy, target_classifier, mask_dict, target_testloader)
+        best_acc = evaluate_sparse_encoder(encoder_copy, target_classifier, mask_dict, target_testloader)
+        logging.info(f'Data ratio {ratio}, Data volume {train_sample_num},  NTL+LDA transfer from {source_domain} to {target_domain} dataset, the best accuracy is {best_acc}')
 
 if __name__ == "__main__":
     # Set the random seed for reproducible experiments
