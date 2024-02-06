@@ -263,7 +263,7 @@ def main():
     total_train_samples = len(target_trainloader.dataset)
 
     # Training sample number
-    ratios = np.array([0.0001, 0.001, 0.002, 0.005, 0.008, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0])
+    ratios = np.array([0.001, 0.002, 0.005, 0.008, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0])
     train_sample_nums = [int(total_train_samples*ratio) for ratio in ratios]
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

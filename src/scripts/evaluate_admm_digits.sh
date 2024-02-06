@@ -1,8 +1,9 @@
 #/bin/bash
 
 # Evaluate  ADMM using a for loop when source and target are different
-source_set=('mnist' 'mnistm' 'svhn' 'usps' 'syn' 'cifar10' 'stl')
-target_set=('mnistm' 'svhn' 'usps' 'syn' 'mnist' 'stl' 'cifar10')
+# source_set=('mnist' 'mnistm' 'svhn' 'usps' 'syn' 'cifar10' 'stl')
+source_set=('cifar10')
+target_set=('stl')
 arch='resnet18'
 rho=0.005
 alpha=1
@@ -17,7 +18,7 @@ do
         # Only run if source and target are different
         if [ ${source} != ${target} ]
         then
-            python src/evaluate_evaluate_encoder_impact.py data/ --arch=${arch} --source=${source} --target=${target} \
+            python src/evaluate/evaluate_encoder_impact.py data/ --arch=${arch} --source=${source} --target=${target} \
                 --rho=${rho} --alpha=${alpha} --lr=${lr} --epochs=${epochs} --finetune-ratio=${finetune_ratio}
         fi
     done

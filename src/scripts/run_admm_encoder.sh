@@ -2,8 +2,8 @@
 
 # Run ADMM
 arch='resnet18'
-source='mnist'
-target='cifar10'
+source='cifar10'
+target='stl'
 rho=0.005
 alpha=1
 lr=1e-3
