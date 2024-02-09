@@ -235,10 +235,11 @@ def main():
     resnet_classifier = ResNetClassifier(model)
 
     # Load the pretrained model from saved state dict
-    encoder_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_encoder.pth'
-    classifier_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_source_classifier.pth'
-    mask_path  = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_mask.pth'
-    admm_pickle_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl'
+    encoder_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_encoder.pth'
+    classifier_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_source_classifier.pth'
+    mask_path  = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_mask.pth'
+    
+    # admm_pickle_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl'
 
     mask_dict = torch.load(mask_path)
     resnet_encoder = torch.load(encoder_path)
