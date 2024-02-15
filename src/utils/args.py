@@ -12,6 +12,8 @@ def get_args():
     parser.add_argument('--prune-method', choices=['admm-ntl', 'admm-lda', 'original'], 
                         default='admm-lda', 
                         help='pruning method for model non-transferability')
+    
+    parser.add_argument('--image-size', default=32, type=int, help='image size')
 
     ############################# required settings ################################
     parser.add_argument('data', metavar='DIR',

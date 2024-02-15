@@ -15,7 +15,7 @@ def get_cifar_dataloader(args, ratio=1.0):
     """
     # Data loading code for cifar10 
     train_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.RandomHorizontalFlip(),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
@@ -25,7 +25,7 @@ def get_cifar_dataloader(args, ratio=1.0):
     ])
 
     val_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
             mean=[0.4914, 0.4822, 0.4465],
@@ -78,7 +78,7 @@ def get_usps_dataloader(args, ratio=1.0):
     """
     # Data loading code for USPS 
     train_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.Grayscale(num_output_channels=3),
         transforms.transforms.RandomHorizontalFlip(),
         transforms.transforms.ToTensor(),
@@ -89,7 +89,7 @@ def get_usps_dataloader(args, ratio=1.0):
     ])
 
     val_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.Grayscale(num_output_channels=3),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
@@ -142,7 +142,7 @@ def get_mnist_dataloader(args, ratio=1.0):
     """
     # Data loading code for MNIST 
     train_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.Grayscale(num_output_channels=3),
         transforms.transforms.RandomHorizontalFlip(),
         transforms.transforms.ToTensor(),
@@ -153,7 +153,7 @@ def get_mnist_dataloader(args, ratio=1.0):
     ])
 
     val_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.Grayscale(num_output_channels=3),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
@@ -206,7 +206,7 @@ def get_svhn_dataloader(args, ratio=1.0):
     """
     # Data loading code for SVHN 
     train_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.RandomHorizontalFlip(),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
@@ -216,7 +216,7 @@ def get_svhn_dataloader(args, ratio=1.0):
     ])
 
     val_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
             mean=[0.4377, 0.4438, 0.4728],
@@ -268,7 +268,7 @@ def get_mnistm_dataloader(args, ratio=1.0):
     """
     # Data loading code for MNISTM 
     train_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.RandomHorizontalFlip(),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
@@ -278,7 +278,7 @@ def get_mnistm_dataloader(args, ratio=1.0):
     ])
 
     val_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
             mean=[0.1307],
@@ -330,13 +330,13 @@ def get_syn_dataloader(args, ratio=1.0):
     """
     # Data loading code for Synthetic Digits 
     train_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.RandomHorizontalFlip(),
         transforms.transforms.ToTensor(),
     ])
 
     val_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.ToTensor(),
     ])
 
@@ -386,7 +386,7 @@ def get_cifar100_dataloader(args, ratio=1.0):
     """
     # Data loading code for cifar100 
     train_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.RandomHorizontalFlip(),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
@@ -396,7 +396,7 @@ def get_cifar100_dataloader(args, ratio=1.0):
     ])
 
     val_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.ToTensor(),
         transforms.transforms.Normalize(
             mean=[0.5071, 0.4865, 0.4409],
@@ -448,13 +448,13 @@ def get_stl_dataloader(args, ratio=0.1):
     """
     # Data loading code for STL10 
     train_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.RandomHorizontalFlip(),
         transforms.transforms.ToTensor(),
     ])
 
     val_transform = transforms.transforms.Compose([
-        transforms.Resize(32),
+        transforms.Resize(args.image_size),
         transforms.transforms.ToTensor(),
     ])
 
