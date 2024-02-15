@@ -9,7 +9,7 @@ def get_args():
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 
     ############################# settings for pruning ###################################
-    parser.add_argument('--prune-method', choices=['admm-ntl', 'admm-lda'], 
+    parser.add_argument('--prune-method', choices=['admm-ntl', 'admm-lda', 'original'], 
                         default='admm-lda', 
                         help='pruning method for model non-transferability')
 

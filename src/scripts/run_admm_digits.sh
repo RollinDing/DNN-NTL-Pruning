@@ -10,7 +10,7 @@ lr=1e-3
 epochs=20
 finetune_ratio=0.1
 prune_method='admm-ntl'
-seed=2
+seed=1
 
 
 for source in ${source_set[@]}

@@ -8,7 +8,7 @@ rho=0.005
 alpha=1
 lr=1e-3
 epochs=20
-finetune_ratio=0.1
+finetune_ratio=1.0
 prune_method='admm-ntl'
 seed=2
 

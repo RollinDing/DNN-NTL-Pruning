@@ -67,6 +67,40 @@ def sfda_multiclass_regularization_loss(outputs, targets, num_classes, data_type
         reg_loss = lambda_reg * ( within_class_scatter/between_class_scatter)
     return reg_loss
 
+class MMD_loss(nn.Module):
+    def __init__(self, kernel_mul = 2.0, kernel_num = 5):
+        super(MMD_loss, self).__init__()
+        self.kernel_num = kernel_num
+        self.kernel_mul = kernel_mul
+        self.fix_sigma = None
+        return
+    def guassian_kernel(self, source, target, kernel_mul=2.0, kernel_num=5, fix_sigma=None):
+        n_samples = int(source.size()[0])+int(target.size()[0])
+        total = torch.cat([source, target], dim=0)
+
+        total0 = total.unsqueeze(0).expand(int(total.size(0)), int(total.size(0)), int(total.size(1)))
+        total1 = total.unsqueeze(1).expand(int(total.size(0)), int(total.size(0)), int(total.size(1)))
+        L2_distance = ((total0-total1)**2).sum(2) 
+        if fix_sigma:
+            bandwidth = fix_sigma
+        else:
+            bandwidth = torch.sum(L2_distance.data) / (n_samples**2-n_samples)
+        bandwidth /= kernel_mul ** (kernel_num // 2)
+        bandwidth_list = [bandwidth * (kernel_mul**i) for i in range(kernel_num)]
+        kernel_val = [torch.exp(-L2_distance / bandwidth_temp) for bandwidth_temp in bandwidth_list]
+        return sum(kernel_val)
+
+    def forward(self, source, target):
+        batch_size = int(source.size()[0])
+        kernels = self.guassian_kernel(source, target, kernel_mul=self.kernel_mul, kernel_num=self.kernel_num, fix_sigma=self.fix_sigma)
+        XX = kernels[:batch_size, :batch_size]
+        YY = kernels[batch_size:, batch_size:]
+        XY = kernels[:batch_size, batch_size:]
+        YX = kernels[batch_size:, :batch_size]
+        loss = torch.mean(XX + YY - XY -YX)
+        return loss
+
+
 class ADMMEncoderPruner:
     def __init__(self, encoder, classifier, source_loader, target_loader, args, prune_percentage=0.9, source_perf_threshold=0.9, max_iterations=30):    
         self.source_loader = source_loader
@@ -281,7 +315,7 @@ class ADMMEncoderPruner:
                 source_loss = criterion(source_outputs, source_labels)
                 target_loss = criterion(target_outputs, target_labels)
 
-                loss = source_loss - alpha*torch.clamp(target_loss, max=10) 
+                loss = source_loss 
 
                 # a value consider the inner class variance of the features
                 cond_source_features = 0
@@ -294,9 +328,10 @@ class ADMMEncoderPruner:
 
                 # SFDA loss 
                 if self.args.prune_method == 'admm-lda':
+                    loss -= alpha*torch.clamp(target_loss, max=10) 
                     loss += sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=1e3)
                 elif self.args.prune_method == 'admm-ntl':
-                    loss = loss
+                    loss -= alpha*torch.clamp(target_loss, max=1) * torch.clamp(MMD_loss()(source_features.view(source_features.size(0), -1), target_features.view(target_features.size(0), -1)), max=1) 
                 
                 # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
                 # Compute ADMM regularization term with detached Z and U
