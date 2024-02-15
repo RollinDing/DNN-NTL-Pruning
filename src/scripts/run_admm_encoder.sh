@@ -1,15 +1,15 @@
 #/bin/bash
 
 # Run ADMM
-arch='resnet18'
-source='cifar10'
-target='stl'
+arch='vgg11'
+source='usps'
+target='svhn'
 rho=0.005
 alpha=1
 lr=1e-3
 epochs=20
-finetune_ratio=1.0
-prune_method='admm-ntl'
+finetune_ratio=0.1
+prune_method='admm-lda'
 seed=2
 
 python src/prune/admm_encoder.py data/ --arch=${arch} --source=${source} --target=${target} \

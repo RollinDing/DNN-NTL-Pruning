@@ -58,6 +58,55 @@ class ResNetClassifier(nn.Module):
         x = self.classifier(x)
         return x
 
+class VGGEncoder(nn.Module):
+    def __init__(self, original_model):
+        super(VGGEncoder, self).__init__()
+        # Copy layers from the original model up to the average pooling layer
+        self.features = nn.Sequential(*list(original_model.children())[:-2])
+
+    def apply_mask(self, module, mask):
+        original_weight = module.weight.data.clone()
+        module.weight.data *= mask
+        if module.bias is not None:
+            original_bias = module.bias.data.clone()
+            module.bias.data *= mask
+        else:
+            original_bias = None
+        return original_weight, original_bias
+
+    def restore_weight(self, module, original_weight, original_bias):
+        module.weight.data = original_weight
+        if original_bias is not None:
+            module.bias.data = original_bias
+
+    def forward(self, x, weight_masks):
+        for feature in self.features:
+            if isinstance(feature, nn.Sequential):
+                for name, module in feature.named_children():
+                    if isinstance(module, nn.Conv2d) and name in weight_masks:
+                        original_weight, original_bias = self.apply_mask(module, weight_masks[name])
+                        x = module(x)
+                        self.restore_weight(module, original_weight, original_bias)
+                    else:
+                        x = module(x)
+            else:
+                x = feature(x)
+        return x
+
+class VGGClassifier(nn.Module):
+    def __init__(self, original_model, num_classes=1000):
+        super(VGGClassifier, self).__init__()
+        self.num_classes = num_classes
+        # The average pooling layer and fully connected layer
+        self.avgpool = original_model.avgpool
+        self.classifier = original_model.classifier
+
+    def forward(self, x):
+        x = self.avgpool(x)
+        x = x.view(x.size(0), -1)
+        x = self.classifier(x)
+        return x
+
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
     with torch.no_grad():

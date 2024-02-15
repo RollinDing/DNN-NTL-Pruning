@@ -17,7 +17,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.vgg import PrunableVGG, PrunableResNet18
-from models.encoders import ResNetEncoder, ResNetClassifier
+from models.encoders import ResNetEncoder, ResNetClassifier, VGGEncoder, VGGClassifier
 
 from prune.pruner import load_base_model
 from utils.args import get_args
@@ -258,6 +258,7 @@ class ADMMEncoderPruner:
                         # set the gradient to zero
                         param.grad = param.grad * self.mask_dict[name]
             
+            print(f"Epoch {epoch}: {total_loss/len(self.target_loader)}")
             # Early Stop Criterion:
             # If the loss does not decrease for 10 epochs, stop the training
             if total_loss > best_loss:
@@ -305,9 +306,8 @@ class ADMMEncoderPruner:
                 encoder_optimizer.zero_grad()
 
                 # The architecture-specific forward pass 
-                if self.args.arch == 'resnet18':
-                    source_features = self.encoder(source_input, self.mask_dict)
-                    target_features = self.encoder(target_input, self.mask_dict)
+                source_features = self.encoder(source_input, self.mask_dict)
+                target_features = self.encoder(target_input, self.mask_dict)
                     
                 source_outputs = self.source_classifier(source_features)
                 target_outputs = self.target_classifier(target_features)
@@ -495,10 +495,15 @@ def main():
     elif target_domain == 'stl':
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
     
-    resnet_encoder = ResNetEncoder(model)
-    resnet_classifier = ResNetClassifier(model)
+    if args.arch == 'vgg11':
+        encoder = VGGEncoder(model)
+        classifier = VGGClassifier(model)
+    elif args.arch == 'resnet18':
+        encoder = ResNetEncoder(model)
+        classifier = ResNetClassifier(model)
+
     # Initialize the ADMM pruner
-    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=5000, prune_percentage=0.99)
+    admm_pruner = ADMMEncoderPruner(encoder, classifier, source_trainloader, target_trainloader, args, max_iterations=5000, prune_percentage=0.99)
     admm_pruner.initialize_target_classifier()
     # Evaluate the model
     admm_pruner.evaluate(source_testloader)

@@ -15,7 +15,7 @@ import pickle
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from prune.pruner import load_base_model
-from models.encoders import ResNetEncoder, ResNetClassifier
+from models.encoders import ResNetEncoder, ResNetClassifier, VGGEncoder, VGGClassifier
 
 from utils.args import get_args
 from utils.data import *
@@ -231,8 +231,12 @@ def main():
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=1)
 
     # evaluate_transferability_with_ratio(model, target_trainloader, target_testloader)
-    resnet_encoder = ResNetEncoder(model)
-    resnet_classifier = ResNetClassifier(model)
+    if args.arch == 'vgg11':
+        resnet_encoder = VGGEncoder(model)
+        resnet_classifier = VGGClassifier(model)
+    elif args.arch == 'resnet18':
+        resnet_encoder = ResNetEncoder(model)
+        resnet_classifier = ResNetClassifier(model)
 
     # Load the pretrained model from saved state dict
     encoder_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_encoder.pth'
