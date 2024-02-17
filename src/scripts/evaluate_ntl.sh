@@ -1,8 +1,8 @@
 #/bin/bash
 
 # Evaluate  ADMM using a for loop when source and target are different
-source_set=('usps')
-target_set=('svhn')
+source_set=('mnist')
+target_set=('usps')
 # target_set=('mnist' 'mnistm' 'svhn' 'usps' 'syn' 'cifar10' 'stl')
 arch='resnet18'
 rho=0.005

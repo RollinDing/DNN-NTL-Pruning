@@ -1,17 +1,17 @@
 #/bin/bash
 
 # Evaluate  ADMM using a for loop when source and target are different
-source_set=('mnistm')
+source_set=('mnist')
 target_set=('usps')
 # target_set=('mnist' 'mnistm' 'svhn' 'usps' 'syn' 'cifar10' 'stl')
-arch='resnet18'
+arch='vgg11'
 rho=0.005
 alpha=1
 lr=1e-3
 epochs=20
 finetune_ratio=0.1
-prune_method='admm-ntl'
-seed=1
+prune_method='admm-lda'
+seed=2
 
 for source in ${source_set[@]}
 do

@@ -29,7 +29,7 @@ import random
 
 def sfda_multiclass_regularization_loss(outputs, targets, num_classes, data_type, lambda_reg=0.01):
     """
-    SFDA regularization loss for multi-class classification.
+    FDA regularization loss for multi-class classification.
     
     outputs: model predictions, shape (batch_size, num_features)
     targets: ground truth labels, shape (batch_size,)
