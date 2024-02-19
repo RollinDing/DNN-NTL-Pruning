@@ -25,7 +25,7 @@ def local_transfer(model, source_trainloader, source_testloader):
     # finetune the model on source dataset 
     print('Finetune the model on source dataset')
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    nepochs = 100
+    nepochs = 1000
     model.to(device)    
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
@@ -95,6 +95,9 @@ def main():
     elif args.arch == 'resnet18':
         model = torchvision.models.resnet18(pretrained=False)
         model.fc = nn.Linear(512, num_classes)
+    elif args.arch == 'resnet50':
+        model = torchvision.models.resnet50(pretrained=False)
+        model.fc = nn.Linear(2048, num_classes)
 
     source_domain = args.source
     target_domain = args.target

@@ -1,10 +1,11 @@
 #/bin/bash
 # Run ADMM
-arch='resnet18'
+arch='resnet50'
 rho=0.0025
 alpha=1
 lr=1e-3
 epochs=20
+batch_size=32
 
 # source_list=('usps' 'svhn' 'syn' 'mnistm' 'cifar10' 'stl' 'mnist')
 # target_list=('usps' 'svhn' 'syn' 'mnistm' 'cifar10' 'stl' 'mnist')
@@ -18,7 +19,7 @@ for source in "${source_list[@]}"; do
         if [ ${source} != ${target} ]
         then
             for finetune_ratio in "${finetune_ratio_list[@]}"; do
-                python src/local/local_transfer.py data/ --arch=${arch} --source=${source} --target=${target} \
+                python src/local/local_transfer.py data/ --arch=${arch} --source=${source} --target=${target} --batch-size=32\
                     --rho=${rho} --alpha=${alpha} --lr=${lr} --epochs=${epochs} --finetune-ratio=${finetune_ratio} --image-size=${image_size}
             done
         fi

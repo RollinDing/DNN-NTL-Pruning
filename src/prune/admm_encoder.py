@@ -279,7 +279,9 @@ class ADMMEncoderPruner:
         # Initialize the loss function
         criterion = nn.CrossEntropyLoss()
 
-        for epoch in range(1):
+        all_admm_loss = 0
+        nepoch = 10
+        for epoch in range(nepoch):
             # Update model weights using ADMM loss
             loss_sum = 0
             admm_loss_sum = 0
@@ -355,7 +357,7 @@ class ADMMEncoderPruner:
                 loss_sum += loss.item()
                 source_loss_sum += source_loss.item()
                 target_loss_sum += target_loss.item()
-                admm_loss_sum += rho/2 * admm_reg.item()
+                admm_loss_sum += admm_loss.item()
                 sample_num += source_input.size(0)
                 src_var += cond_source_features
                 tgt_var += cond_target_variance
@@ -371,9 +373,11 @@ class ADMMEncoderPruner:
 
             # Print the admm loss set in 2 demical values
             logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f};')
-
+            all_admm_loss += admm_loss
             # logging.info(f"Epoch {epoch}: Source loss: {source_loss.item()}")
             # logging.info(f"Epoch {epoch}: Target loss: {target_loss.item()}")
+        return all_admm_loss / nepoch
+    
 
     def admm_loss(self, device, model, Z, U, rho, output, target, criterion):
         loss = criterion(output, target)
@@ -396,7 +400,7 @@ class ADMMEncoderPruner:
         # Set model to train mode
         self.encoder.train()
         for iteration in range(self.max_iterations):
-            self.update_weights(Z_dict, U_dict, rho, alpha)
+            admm_loss = self.update_weights(Z_dict, U_dict, rho, alpha)
             # Update the Z variables
             l1_alpha = 1e-4
             Z_dict = self.update_Z_l1(U_dict, l1_alpha, rho)
@@ -413,6 +417,11 @@ class ADMMEncoderPruner:
             sparsity = self.model_sparsity()
             if sparsity > self.prune_percentage:
                 break
+            # Check whether there is an improvement in the loss to early stop 
+            if iteration > 10:
+                if abs(admm_loss - previous_loss) < 1e-4:
+                    break
+            previous_loss = admm_loss
 
 def main():
     # load args 
@@ -502,7 +511,7 @@ def main():
         target_trainloader, target_testloader = get_imagenette_dataloader(args, ratio=finetune_ratio)
     elif target_domain == 'imagewoof':
         target_trainloader, target_testloader = get_imagewoof_dataloader(args, ratio=finetune_ratio)
-        
+
     
     if args.arch == 'vgg11':
         encoder = VGGEncoder(model)
