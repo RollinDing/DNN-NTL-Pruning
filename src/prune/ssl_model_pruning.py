@@ -28,9 +28,10 @@ from utils.data import *
 def load_ssl_model(args, model, device):
     # load the pretrained model trained with self-supervised learning
     method = "simclr"
-    model_path = f"base_models/{args.arch}-{method}-{args.source}.tar" 
+    # model_path = f"base_models/{args.arch}-{method}-{args.source}.tar"
+    model_path = f"base_models/ssl_models/moco-v1.pth" 
     checkpoint = torch.load(model_path, map_location=device)
-    state_dict = checkpoint['state_dict']
+    state_dict = checkpoint
     for k in list(state_dict.keys()):
         if k.startswith('backbone.'):
             if k.startswith('backbone') and not k.startswith('backbone.fc'):
@@ -48,7 +49,7 @@ def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloa
     classifier.to(device)
 
     # fine-tune the encoder and classifier
-    # optimizer = torch.optim.SGD([param for name, param in encoder.named_parameters() if param.requires_grad] + [param for name, param in classifier.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
+    # optimizer = torch.optim.SGD([param for name, param in classifier.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
     optimizer = torch.optim.Adam([param for name, param in encoder.named_parameters() if param.requires_grad] + [param for name, param in classifier.named_parameters() if param.requires_grad], lr=lr, weight_decay=0.0008)
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -183,6 +184,10 @@ def main():
         target_trainloader, target_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
     elif target_domain == 'stl':
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'imagenette':
+        target_trainloader, target_testloader = get_imagenette_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'imagewoof':
+        target_trainloader, target_testloader = get_imagewoof_dataloader(args, ratio=finetune_ratio)
     
     resnet_encoder = ResNetEncoder(model)
     resnet_classifier = ResNetClassifier(model)
@@ -196,7 +201,7 @@ def main():
     # admm_pruner.evaluate(target_testloader)
     
     # finetune the encoder and classifier
-    finetune_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_trainloader, source_testloader, nepochs=30, lr=0.001)
+    finetune_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_trainloader, source_testloader, nepochs=30, lr=1e-4)
     # Evaluate the model
     evaluate_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_testloader)    
     exit()

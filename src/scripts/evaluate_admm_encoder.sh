@@ -9,7 +9,7 @@ lr=1e-3
 epochs=10
 finetune_ratio=1
 prune_method='admm-lda'
-seed=1
+seed=2
 image_size=224
 
 python src/evaluate/evaluate_encoder_impact.py data/ --arch=${arch} --source=${source} --target=${target} --image-size=${image_size}\
