@@ -129,6 +129,10 @@ def main():
         target_trainloader, target_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
     elif target_domain == 'stl':
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'imagenette':
+        target_trainloader, target_testloader = get_imagenette_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'imagewoof':
+        target_trainloader, target_testloader = get_imagewoof_dataloader(args, ratio=finetune_ratio)
 
     # Train the model from scratch
     best_acc = local_train(model, target_trainloader, target_testloader)

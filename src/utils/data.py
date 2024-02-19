@@ -1,13 +1,15 @@
 import torch 
-import torch.nn as nn
-import torchvision
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from torch.utils.data import Subset
+from torchvision.datasets import ImageFolder
+from torch.utils.data import DataLoader
 import numpy as np
 
 from .mnistm import MNISTM
 from .syn import SyntheticDigits
+
+from utils.args import get_args
 
 def get_cifar_dataloader(args, ratio=1.0):
     """
@@ -496,3 +498,81 @@ def get_stl_dataloader(args, ratio=0.1):
     )
 
     return train_loader, val_loader
+
+def get_imagenette_dataloader(args, ratio=0.1):
+    # Define transformations
+
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+
+    transform = transforms.Compose([
+        transforms.Resize((args.image_size, args.image_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
+
+    # Create train and test dataset and dataloader
+    data_path = args.data + "imagenette2/train"
+    train_dataset = ImageFolder(root=data_path, transform=transform)
+
+    # Define the size of the subset
+    subset_size = int(len(train_dataset)*ratio)
+    print(f"Using sample size of {subset_size}.")
+                      
+    # Create a random subset for training
+    indices = np.random.permutation(len(train_dataset))
+    train_indices = indices[:subset_size]
+    train_subset = Subset(train_dataset, train_indices)
+
+    train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
+
+    data_path = args.data + "imagenette2/val"
+    test_dataset = ImageFolder(root=data_path, transform=transform)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
+
+    return train_loader, test_loader
+
+def get_imagewoof_dataloader(args, ratio=0.1):
+    # Define transformations
+
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+
+    transform = transforms.Compose([
+        transforms.Resize((args.image_size, args.image_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
+
+    # Create train and test dataset and dataloader
+    data_path = args.data + "imagewoof2/train"
+    train_dataset = ImageFolder(root=data_path, transform=transform)
+    # Define the size of the subset
+    subset_size = int(len(train_dataset)*ratio)
+    print(f"Using sample size of {subset_size}.")
+                      
+    # Create a random subset for training
+    indices = np.random.permutation(len(train_dataset))
+    train_indices = indices[:subset_size]
+    train_subset = Subset(train_dataset, train_indices)
+
+    train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
+    
+    data_path = args.data + "imagewoof2/val"
+    test_dataset = ImageFolder(root=data_path, transform=transform)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
+
+    return train_loader, test_loader
+
+if __name__ == "__main__":
+    pass
+    # args = get_args()
+    # train_loader, val_loader = get_imagenette_dataloader(args)
+    # train_loader, val_loader = get_imagewoof_dataloader(args)
+    # for i, (input, target) in enumerate(train_loader):
+    #     print(input.shape, target.shape)
+    #     break
+    # for i, (input, target) in enumerate(val_loader):
+    #     print(input.shape, target.shape)
+    #     break
+    # print("Done.")

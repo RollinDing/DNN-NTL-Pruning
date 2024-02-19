@@ -23,10 +23,10 @@ def get_args():
                         help='model architecture: ' +
                             ' | '.join(model_names) +
                             ' (default: resnet50)')
-    parser.add_argument('--source', choices=['mnist', 'svhn', 'usps', 'mnistm', 'syn', 'cifar10', 'cifar100', 'stl'], 
+    parser.add_argument('--source', choices=['mnist', 'svhn', 'usps', 'mnistm', 'syn', 'cifar10', 'cifar100', 'stl', 'imagenette', 'imagewoof'], 
                         default='mnist', 
                         help='source dataset')
-    parser.add_argument('--target', choices=['mnist', 'svhn', 'usps', 'mnistm', 'syn', 'cifar10', 'cifar100', 'stl'],
+    parser.add_argument('--target', choices=['mnist', 'svhn', 'usps', 'mnistm', 'syn', 'cifar10', 'cifar100', 'stl', 'imagenette', 'imagewoof'],
                         default='usps', 
                         help='target dataset')
     parser.add_argument('--finetune-ratio', default=0.1, type=float, help='finetune ratio')

@@ -130,6 +130,10 @@ def main():
         source_trainloader, source_testloader = get_syn_dataloader(args, ratio=1)
     elif source_domain == 'stl':
         source_trainloader, source_testloader = get_stl_dataloader(args, ratio=1)
+    elif source_domain == 'imagenette':
+        source_trainloader, source_testloader = get_imagenette_dataloader(args, ratio=1)
+    elif source_domain == 'imagewoof':
+        source_trainloader, source_testloader = get_imagewoof_dataloader(args, ratio=1) 
 
     model = load_base_model(model, args.arch, source_domain, source_trainloader, source_testloader)
 
@@ -148,6 +152,10 @@ def main():
         target_trainloader, target_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
     elif target_domain == 'stl':
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'imagenette':
+        target_trainloader, target_testloader = get_imagenette_dataloader(args, ratio=finetune_ratio)
+    elif target_domain == 'imagewoof':
+        target_trainloader, target_testloader = get_imagewoof_dataloader(args, ratio=finetune_ratio)
 
     # Train the model from scratch
     best_acc = local_transfer(model, target_trainloader, target_testloader)

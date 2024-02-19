@@ -24,6 +24,7 @@ from prune.admm_encoder import ADMMEncoderPruner
 from utils.args import get_args
 from utils.data import *
 
+
 def load_ssl_model(args, model, device):
     # load the pretrained model trained with self-supervised learning
     method = "simclr"
@@ -40,6 +41,66 @@ def load_ssl_model(args, model, device):
     model.load_state_dict(state_dict, strict=False)
     
     return model
+
+def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloader, nepochs=30, lr=0.001):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    encoder.to(device)
+    classifier.to(device)
+
+    # fine-tune the encoder and classifier
+    # optimizer = torch.optim.SGD([param for name, param in encoder.named_parameters() if param.requires_grad] + [param for name, param in classifier.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
+    optimizer = torch.optim.Adam([param for name, param in encoder.named_parameters() if param.requires_grad] + [param for name, param in classifier.named_parameters() if param.requires_grad], lr=lr, weight_decay=0.0008)
+    criterion = torch.nn.CrossEntropyLoss()
+
+    encoder.train()
+    classifier.train()
+    for epoch in range(nepochs):
+        total_loss = 0.0
+        count = 0
+        for inputs, labels in trainloader:
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            optimizer.zero_grad()
+            features = encoder(inputs, mask_dict)
+            outputs  = classifier(features)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            total_loss += loss.item()
+            count += len(labels)
+            optimizer.step()
+
+            # apply the mask to the model
+            for name, param in encoder.named_parameters():
+                if name in mask_dict:
+                    param.data = param.data * mask_dict[name]
+                    # set the gradient to zero
+                    param.grad = param.grad * mask_dict[name]
+
+        print(f"Epoch {epoch}: {total_loss/count}")
+
+def evaluate_sparse_encoder(encoder, classifier, mask_dict, testloader):
+    # Fine-tune the model using trainloader
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    encoder.to(device)
+    classifier.to(device)
+
+    # Evaluate the model using testloader
+    encoder.eval()
+    classifier.eval()
+
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, labels in testloader:
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            features = encoder(inputs, mask_dict)
+            outputs = classifier(features)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    print(f"Evaluate Accuracy: {correct/total}")
+
 
 def main():
     # load args 
@@ -99,6 +160,10 @@ def main():
         source_trainloader, source_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
     elif source_domain == 'stl':
         source_trainloader, source_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
+    elif source_domain == 'imagenette':
+        source_trainloader, source_testloader = get_imagenette_dataloader(args, ratio=finetune_ratio)
+    elif source_domain == 'imagewoof':
+        source_trainloader, source_testloader = get_imagewoof_dataloader(args, ratio=finetune_ratio)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = load_ssl_model(args, model, device)
@@ -123,13 +188,17 @@ def main():
     resnet_classifier = ResNetClassifier(model)
     # Initialize the ADMM pruner
     admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
+    mask_dict = admm_pruner.mask_dict
+    # admm_pruner.finetune_model(source_trainloader)
+    # # admm_pruner.initialize_target_classifier()
+    # # Evaluate the model
+    # admm_pruner.evaluate(source_testloader)
+    # admm_pruner.evaluate(target_testloader)
     
-    admm_pruner.finetune_model(source_trainloader)
-    # admm_pruner.initialize_target_classifier()
+    # finetune the encoder and classifier
+    finetune_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_trainloader, source_testloader, nepochs=30, lr=0.001)
     # Evaluate the model
-    admm_pruner.evaluate(source_testloader)
-    admm_pruner.evaluate(target_testloader)
-    
+    evaluate_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_testloader)    
     exit()
     # Run the ADMM algorithm
     admm_pruner.run_admm()
