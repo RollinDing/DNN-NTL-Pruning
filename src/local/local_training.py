@@ -14,7 +14,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.vgg import PrunableVGG, PrunableResNet18
-from models.encoders import ResNetEncoder, ResNetClassifier
+from models.encoders import ResNetEncoder, ResNetClassifier, VGGEncoder, VGGClassifier
 
 from prune.pruner import load_base_model
 from utils.args import get_args

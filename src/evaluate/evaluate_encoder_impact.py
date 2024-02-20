@@ -274,7 +274,10 @@ def main():
     source_encoder = deepcopy(resnet_encoder)
     source_classifier = deepcopy(resnet_classifier)
     finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
-    evaluate_sparse_encoder(source_encoder, source_classifier, mask_dict, source_testloader)
+    best_acc = evaluate_sparse_encoder(source_encoder, source_classifier, mask_dict, source_testloader)
+    logging.info(f'ADMM: {source_domain} to {target_domain} dataset, the SOURCE DOMAIN best accuracy is {best_acc}')
+
+    
     print("Evaluate the model on target domain")
     target_encoder = deepcopy(resnet_encoder)
     target_classifier = deepcopy(resnet_classifier)
