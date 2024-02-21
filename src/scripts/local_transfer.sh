@@ -1,17 +1,18 @@
 #/bin/bash
 # Run ADMM
-arch='resnet50'
+arch='vgg11'
 rho=0.0025
 alpha=1
 lr=1e-3
 epochs=20
 batch_size=32
 
-# source_list=('usps' 'svhn' 'syn' 'mnistm' 'cifar10' 'stl' 'mnist')
-# target_list=('usps' 'svhn' 'syn' 'mnistm' 'cifar10' 'stl' 'mnist')
-source_list=('imagewoof')
-target_list=('imagenette')
-image_size=224
+source_list=('usps' 'svhn' 'syn' 'mnistm' 'cifar10' 'stl' 'mnist')
+target_list=('usps' 'svhn' 'syn' 'mnistm' 'cifar10' 'stl' 'mnist')
+# source_list=('imagewoof')
+# target_list=('imagenette')
+# image_size=224
+image_size=32
 finetune_ratio_list=(0.001 0.002 0.005 0.008 0.01 0.02 0.05 0.1 0.2 0.5 1)
 
 for source in "${source_list[@]}"; do
