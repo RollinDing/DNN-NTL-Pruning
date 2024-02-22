@@ -4,7 +4,7 @@
 source_set=('mnist' 'mnistm' 'svhn' 'usps' 'syn')
 target_set=('mnist' 'mnistm' 'svhn' 'usps' 'syn')
 # target_set=('mnist' 'mnistm' 'svhn' 'usps' 'syn' 'cifar10' 'stl')
-arch='resnet18'
+arch='vgg11'
 rho=0.005
 alpha=1
 lr=1e-3

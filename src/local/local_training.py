@@ -28,7 +28,7 @@ def local_train(model, source_trainloader, source_testloader):
     nepochs = 100
     model.to(device)    
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
     # optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=5e-4)
     # adjust the learning rate
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
@@ -59,7 +59,7 @@ def local_train(model, source_trainloader, source_testloader):
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
-        print(f'Epoch {epoch+1}/{nepochs}, Accuracy on source dataset: {correct / total}')
+        print(f'Epoch {epoch+1}/{nepochs}, Accuracy on dataset: {correct / total}')
 
         # Early stopping
         if correct / total > best_acc:
@@ -82,7 +82,7 @@ def main():
     num_classes = 10
     if args.arch == 'vgg11':
         # Load the pretrained model 
-        model = torchvision.models.vgg11(pretrained=True)
+        model = torchvision.models.vgg11(pretrained=False)
         # change the output layer to 10 classes (for digits dataset)
         model.classifier = nn.Sequential(
             nn.Linear(512 * 7 * 7, 4096),
@@ -94,10 +94,10 @@ def main():
             nn.Linear(4096, num_classes),
         )
     elif args.arch == 'resnet18':
-        model = torchvision.models.resnet18(pretrained=True)
+        model = torchvision.models.resnet18(pretrained=False)
         model.fc = nn.Linear(512, num_classes)
     elif args.arch == 'resnet50':
-        model = torchvision.models.resnet50(pretrained=True)
+        model = torchvision.models.resnet50(pretrained=False)
         model.fc = nn.Linear(2048, num_classes)
 
     target_domain = args.target

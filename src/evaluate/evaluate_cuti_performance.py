@@ -76,8 +76,10 @@ def evaluate_model(model, testloader):
 def main():
     # load args 
     args = get_args()
+    source_domain= args.source
+    target_domain= args.target
     # Load the state dict of the model
-    state_dict = torch.load('saved_models/vgg11/CUTI/usps_to_svhn.pth')
+    state_dict = torch.load(f'saved_models/vgg11/CUTI/{source_domain}_to_{target_domain}.pth')
     # Rename the unexpected keys in state_dict
     # Remove the 1 after classifier key
     for i in [0, 3, 6]:
@@ -99,8 +101,7 @@ def main():
 
     model.load_state_dict(state_dict)
     # Evaluate the source accuracy 
-    source_domain= args.source
-    target_domain= args.target
+
     seed=0
 
     # Set the seed
@@ -157,6 +158,14 @@ def main():
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=1)
 
     # Evaluate the model transferability with different number of fine-tuning samples
+        
+    # Evaluate the model
+    print("Evaluate the model on source domain")
+    model_copy = deepcopy(model)
+    finetune_model(model_copy, source_trainloader, source_testloader, lr=1e-4)
+    best_acc = evaluate_model(model_copy, source_testloader)
+    logging.info(f'CUTI: {source_domain} to {target_domain} dataset, the SOURCE DOMAIN best accuracy is {best_acc}')
+
     total_train_samples = len(target_trainloader.dataset)
 
     # Training sample number
@@ -172,8 +181,8 @@ def main():
         # Evaluate the transferability 
         model_copy = deepcopy(model)
 
-        finetune_model(model, subtrainloader, target_testloader, lr=1e-4)
-        best_acc = evaluate_model(model, target_testloader)
+        finetune_model(model_copy, subtrainloader, target_testloader, lr=1e-4)
+        best_acc = evaluate_model(model_copy, target_testloader)
         logging.info(f'Data ratio {ratio}, Data volume {train_sample_num},  CUTI transfer from {source_domain} to {target_domain} dataset, the best accuracy is {best_acc}')
 
 
