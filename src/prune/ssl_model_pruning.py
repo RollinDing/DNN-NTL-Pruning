@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torchvision
+from torchvision import models 
 
 import logging
 import time
@@ -23,7 +24,32 @@ from prune.pruner import load_base_model
 from prune.admm_encoder import ADMMEncoderPruner
 from utils.args import get_args
 from utils.data import *
+import random
 
+def load_ssl_model_weights(model_name):
+    """
+    Load the SSL model weights into a torchvision model.
+    """
+    # Define path to your SSL model weights
+    path = f'base_models/ssl_models/{model_name}.pth'
+    
+    # Load the SSL model weights
+    state_dict = torch.load(path, map_location=torch.device('cpu'))
+    if 'state_dict' in state_dict:
+        state_dict = state_dict['state_dict']
+    # Add renaming logic here if necessary, similar to your rename and remove_keys functions
+    
+    # Load a ResNet-50 model
+    model = models.resnet50(pretrained=False)
+    
+    # Replace the final layer for CIFAR10
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Linear(num_ftrs, 10)  # CIFAR10 has 10 classes
+    
+    # Load the modified state dict
+    model.load_state_dict(state_dict, strict=False)
+    
+    return model
 
 def load_ssl_model(args, model, device):
     # load the pretrained model trained with self-supervised learning
@@ -32,6 +58,7 @@ def load_ssl_model(args, model, device):
     model_path = f"base_models/ssl_models/moco-v1.pth" 
     checkpoint = torch.load(model_path, map_location=device)
     state_dict = checkpoint
+    print(state_dict.keys())
     for k in list(state_dict.keys()):
         if k.startswith('backbone.'):
             if k.startswith('backbone') and not k.startswith('backbone.fc'):
@@ -39,11 +66,11 @@ def load_ssl_model(args, model, device):
                 state_dict[k[len("backbone."):]] = state_dict[k]
         del state_dict[k]
 
-    model.load_state_dict(state_dict, strict=False)
+    model.load_state_dict(state_dict)
     
     return model
 
-def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloader, nepochs=30, lr=0.001):
+def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloader, nepochs=100, lr=0.001):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     encoder.to(device)
     classifier.to(device)
@@ -51,11 +78,13 @@ def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloa
     # fine-tune the encoder and classifier
     # optimizer = torch.optim.SGD([param for name, param in classifier.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
     optimizer = torch.optim.Adam([param for name, param in encoder.named_parameters() if param.requires_grad] + [param for name, param in classifier.named_parameters() if param.requires_grad], lr=lr, weight_decay=0.0008)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=nepochs)
     criterion = torch.nn.CrossEntropyLoss()
 
     encoder.train()
     classifier.train()
     for epoch in range(nepochs):
+        print("Epoch: ", epoch)
         total_loss = 0.0
         count = 0
         for inputs, labels in trainloader:
@@ -76,8 +105,12 @@ def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloa
                     param.data = param.data * mask_dict[name]
                     # set the gradient to zero
                     param.grad = param.grad * mask_dict[name]
-
-        print(f"Epoch {epoch}: {total_loss/count}")
+        print(f"Training Loss: {total_loss/count}")
+        # Evaluate the model for every epoch 
+        evaluate_sparse_encoder(encoder, classifier, mask_dict, testloader)
+        scheduler.step()
+        # print current learning rate
+        print(f"Current learning rate: {scheduler.get_last_lr()}")
 
 def evaluate_sparse_encoder(encoder, classifier, mask_dict, testloader):
     # Fine-tune the model using trainloader
@@ -102,10 +135,32 @@ def evaluate_sparse_encoder(encoder, classifier, mask_dict, testloader):
             correct += (predicted == labels).sum().item()
     print(f"Evaluate Accuracy: {correct/total}")
 
+def compare_state_dicts(model_state_dict, loaded_state_dict):
+    model_keys = set(model_state_dict.keys())
+    loaded_keys = set(loaded_state_dict.keys())
+
+    missing_keys = model_keys - loaded_keys
+    unexpected_keys = loaded_keys - model_keys
+
+    if missing_keys:
+        print("Missing keys in the loaded state dict:", missing_keys)
+    else:
+        print("No missing keys in the loaded state dict.")
+
+    if unexpected_keys:
+        print("Unexpected keys in the loaded state dict:", unexpected_keys)
+    else:
+        print("No unexpected keys in the loaded state dict.")
 
 def main():
     # load args 
     args = get_args()
+    # Set the global random seed 
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+
     num_classes = 10
     if args.arch == 'vgg11':
         # Load the pretrained model 
@@ -130,9 +185,10 @@ def main():
     source_domain = args.source
     target_domain = args.target
     finetune_ratio = args.finetune_ratio
+    model_name = args.model_name
 
     # Create the logger 
-    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}')
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}-{model_name}')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
@@ -167,7 +223,19 @@ def main():
         source_trainloader, source_testloader = get_imagewoof_dataloader(args, ratio=finetune_ratio)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = load_ssl_model(args, model, device)
+    # model = load_ssl_model(args, model, device)
+    model = load_ssl_model_weights(model_name)
+    if not model:
+        raise ValueError("Model not found.")
+    model.to(device)
+    loaded_state_dict = torch.load(f'base_models/ssl_models/{model_name}.pth', map_location='cpu')
+
+    # If your loaded state dict is nested under 'state_dict' key, adjust as necessary
+    if 'state_dict' in loaded_state_dict:
+        loaded_state_dict = loaded_state_dict['state_dict']
+
+    # Compare the dicts
+    compare_state_dicts(model.state_dict(), loaded_state_dict)
 
     # Load the target dataset
     if target_domain == 'mnist':
@@ -191,39 +259,58 @@ def main():
     
     resnet_encoder = ResNetEncoder(model)
     resnet_classifier = ResNetClassifier(model)
-    # Initialize the ADMM pruner
-    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=0.98)
-    mask_dict = admm_pruner.mask_dict
+    # Initialize the original mask is all ones 
+    mask_dict = {}
+    # initialize the mask_dict
+    for name, param in resnet_encoder.named_parameters():
+        if param.requires_grad:
+            mask_dict[name] = torch.ones_like(param)
+
     # admm_pruner.finetune_model(source_trainloader)
     # # admm_pruner.initialize_target_classifier()
     # # Evaluate the model
     # admm_pruner.evaluate(source_testloader)
     # admm_pruner.evaluate(target_testloader)
     
-    # finetune the encoder and classifier
-    finetune_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_trainloader, source_testloader, nepochs=30, lr=1e-4)
+    ssl_model_path = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/ssl_models/{args.arch}-{model_name}/{source_domain}_to_{target_domain}')
+    if not os.path.exists(ssl_model_path):
+        os.makedirs(ssl_model_path)
+    
+    # If the model is not finetuned, finetune the model
+    if not os.path.exists(ssl_model_path + '/encoder.pth'):
+        # finetune the encoder and classifier
+        finetune_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_trainloader, source_testloader, nepochs=100, lr=1e-4)
+        # save the pretrained resnet encoder and resnet classifier
+        torch.save(resnet_encoder, ssl_model_path + '/encoder.pth')
+        torch.save(resnet_classifier, ssl_model_path + '/classifier.pth')
+        torch.save(mask_dict, ssl_model_path + '/mask.pth')
+    else:
+        resnet_encoder = torch.load(ssl_model_path + '/encoder.pth')
+        resnet_classifier = torch.load(ssl_model_path + '/classifier.pth')
+        mask_dict = torch.load(ssl_model_path + '/mask.pth')
+
+    # save the pretrained resnet encoder and resnet classifier
     # Evaluate the model
     evaluate_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_testloader)    
-    exit()
+    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=0.95)
     # Run the ADMM algorithm
     admm_pruner.run_admm()
 
     # Create the directory to save the model
-    model_dir = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/{args.arch}/{source_domain}_to_{target_domain}')
+    model_dir = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}')
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
 
-    # save the ADMM pruner as a pickle file
-    with open(f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl', 'wb') as f:
-        pickle.dump(admm_pruner, f)
+    # # save the ADMM pruner as a pickle file
+    # with open(f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl', 'wb') as f:
+    #     pickle.dump(admm_pruner, f)
 
     # Save the pruned model and masks
-    torch.save(admm_pruner.encoder, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_encoder.pth')
-    torch.save(admm_pruner.source_classifier, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_source_classifier.pth')
-    torch.save(admm_pruner.mask_dict, f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_mask.pth')
+    torch.save(admm_pruner.encoder, f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/admm_encoder.pth')
+    torch.save(admm_pruner.source_classifier, f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/admm_source_classifier.pth')
+    torch.save(admm_pruner.mask_dict, f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/admm_mask.pth')
 
+    evaluate_sparse_encoder(admm_pruner.encoder, admm_pruner.source_classifier, admm_pruner.mask_dict, source_testloader)    
 
 if __name__ == "__main__":
-    torch.manual_seed(1)
-    np.random.seed(1)
     main()

@@ -15,6 +15,8 @@ def get_args():
     
     parser.add_argument('--image-size', default=32, type=int, help='image size')
 
+    parser.add_argument('--model-name', type=str, default='moco-v1', help='model name of the ssl model')
+
     ############################# required settings ################################
     parser.add_argument('data', metavar='DIR',
                         help='path to dataset')

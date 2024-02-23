@@ -50,7 +50,7 @@ def sfda_multiclass_regularization_loss(outputs, targets, num_classes, data_type
             within_class_scatter += torch.mean((outputs_class - class_mean).pow(2))
             class_means.append(class_mean)
         else:
-            class_means.append(torch.zeros(outputs.shape[1], device=device))
+            class_means.append(torch.zeros((outputs.shape[1], 7, 7), device=device)) #  The shape of the feature map
     
     class_means = torch.stack(class_means)  # Shape: (num_classes, num_features)
     
@@ -280,7 +280,7 @@ class ADMMEncoderPruner:
         criterion = nn.CrossEntropyLoss()
 
         all_admm_loss = 0
-        nepoch = 10
+        nepoch = 1
         for epoch in range(nepoch):
             # Update model weights using ADMM loss
             loss_sum = 0
@@ -331,7 +331,8 @@ class ADMMEncoderPruner:
                 # SFDA loss 
                 if self.args.prune_method == 'admm-lda':
                     loss -= alpha*torch.clamp(target_loss, max=10) 
-                    loss += sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=1e3)
+                    sfda_loss = min(100, sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=1e-1))
+                    loss += sfda_loss
                 elif self.args.prune_method == 'admm-ntl':
                     loss -= alpha*torch.clamp(target_loss, max=1) * torch.clamp(MMD_loss()(source_features.view(source_features.size(0), -1), target_features.view(target_features.size(0), -1)), max=1) 
                 
@@ -449,6 +450,9 @@ def main():
     elif args.arch == 'resnet18':
         model = torchvision.models.resnet18(pretrained=False)
         model.fc = nn.Linear(512, num_classes)
+    elif args.arch == 'resnet50':
+        model = torchvision.models.resnet50(pretrained=False)
+        model.fc = nn.Linear(2048, num_classes)
 
     source_domain = args.source
     target_domain = args.target
@@ -517,6 +521,9 @@ def main():
         encoder = VGGEncoder(model)
         classifier = VGGClassifier(model)
     elif args.arch == 'resnet18':
+        encoder = ResNetEncoder(model)
+        classifier = ResNetClassifier(model)
+    elif args.arch == 'resnet50':
         encoder = ResNetEncoder(model)
         classifier = ResNetClassifier(model)
 

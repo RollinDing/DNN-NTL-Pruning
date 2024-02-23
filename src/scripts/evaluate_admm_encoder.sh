@@ -1,6 +1,6 @@
 #/bin/bash
 
-arch='resnet18'
+arch='resnet50'
 source='imagenette'
 target='imagewoof'
 rho=0.01
