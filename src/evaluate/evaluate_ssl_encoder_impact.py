@@ -14,7 +14,7 @@ import os
 import pickle
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from prune.ssl_model_pruning import load_ssl_model
+from prune.ssl_model_pruning import load_ssl_model, load_ssl_model_weights
 from models.encoders import ResNetEncoder, ResNetClassifier
 from prune.admm_encoder import ADMMEncoderPruner
 
@@ -88,6 +88,7 @@ def evaluate_sparse_encoder(encoder, classifier, mask_dict, testloader):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
     print(f"Evaluate Accuracy: {correct/total}")
+    return correct/total
 
 def evaluate_transferability_with_ratio(model, target_trainloader, target_testloader):
     # Evaluate the model transferability with different number of fine-tuning samples
@@ -172,7 +173,23 @@ def main():
     source_domain = args.source
     target_domain = args.target
     finetune_ratio = args.finetune_ratio
+    model_name = args.model_name
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    # Create the logger 
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/ssl/{args.prune_method}/{model_name}/{args.seed}')
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}.log')
+    # The log file should clear every time
+    logging.basicConfig(filename=log_path, filemode='w', level=logging.INFO)
+    # Log the time 
+    logging.info(time.asctime(time.localtime(time.time())))
+    # Log the args
+    logging.info(args)
+    # Log the source and target domain
+    logging.info(f'ADMM: {source_domain} to {target_domain}')
 
     # Load the dataset
     if source_domain == 'mnist':
@@ -190,7 +207,8 @@ def main():
     elif source_domain == 'stl':
         source_trainloader, source_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
 
-    model = load_ssl_model(args, model, device)
+    # model = load_ssl_model(args, model, device)
+    model = load_ssl_model_weights(model_name)
 
     # Load the target dataset
     if target_domain == 'mnist':
@@ -212,18 +230,21 @@ def main():
     resnet_encoder = ResNetEncoder(model)
     resnet_classifier = ResNetClassifier(model)
 
-    # Load the pretrained model from saved state dict
-    encoder_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_encoder.pth'
-    classifier_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_source_classifier.pth'
-    mask_path  = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_mask.pth'
-    admm_pickle_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl'
+    if args.prune_method != 'original':
+        # Load the pretrained model from saved state dict
+        encoder_path = f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_encoder.pth'
+        classifier_path = f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_source_classifier.pth'
+        mask_path  = f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_mask.pth'
+        mask_dict = torch.load(mask_path)
+        resnet_encoder = torch.load(encoder_path)
+        resnet_classifier = torch.load(classifier_path)
+    else:
+        resnet_encoder = ResNetEncoder(model)
+        resnet_classifier = ResNetClassifier(model)
+        admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=50, prune_percentage=0.98)
+        mask_dict = admm_pruner.mask_dict
+    
 
-    mask_dict = torch.load(mask_path)
-    resnet_encoder = torch.load(encoder_path)
-    resnet_classifier = torch.load(classifier_path)
-
-    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=50, prune_percentage=0.98)
-    admm_pruner.mask_dict = mask_dict
 
     # admm_pruner = ADMMPruner(pruned_model, source_trainloader, target_trainloader, args)
 
@@ -236,27 +257,25 @@ def main():
         if name in mask_dict:
             total_nonzero_params += torch.sum(mask_dict[name]).item()
     print(f"Model sparsity: {1-total_nonzero_params/total_params}")
+    logging.info(f"Model sparsity: {1-total_nonzero_params/total_params}")
 
     # Evaluate the model
     print("Evaluate the model on source domain")
     source_encoder = deepcopy(resnet_encoder)
     source_classifier = deepcopy(resnet_classifier)
-    # finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
-    evaluate_sparse_encoder(source_encoder, source_classifier, mask_dict, source_testloader)
+    finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
+    best_acc = evaluate_sparse_encoder(source_encoder, source_classifier, mask_dict, source_testloader)
+    logging.info(f'ADMM on {model_name}: {source_domain} to {target_domain} dataset, the SOURCE DOMAIN best accuracy is {best_acc}')
+
 
     print("Evaluate the model on target domain")
-    target_encoder = deepcopy(resnet_encoder)
-    target_classifier = deepcopy(resnet_classifier)
 
     # Evaluate the model transferability with different number of fine-tuning samples
     total_train_samples = len(target_trainloader.dataset)
 
     # Training sample number
-    train_sample_nums = [int(total_train_samples*ratio) for ratio in np.array([0.01, 0.05, 0.1, 0.2, 0.5, 1.0])]
-
-
-    target_encoder.to(device)
-    target_classifier.to(device)
+    ratios = np.array([0.001, 0.002, 0.005, 0.008, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0])
+    train_sample_nums = [int(total_train_samples*ratio) for ratio in ratios]
     
     # build an all-one mask 
     # all_one_mask_dict = {}
@@ -270,7 +289,11 @@ def main():
     #         target_model.state_dict()[name].data = param.data * mask_dict[name] + target_model.state_dict()[name].data * (1 - mask_dict[name])
 
     # For each train sample num, randomly select the samples and evaluate the transferability
-    for train_sample_num in train_sample_nums:
+    for train_sample_num, ratio in zip(train_sample_nums, ratios):
+        target_encoder = deepcopy(resnet_encoder)
+        target_classifier = deepcopy(resnet_classifier)
+        target_encoder.to(device)
+        target_classifier.to(device)
         print(f"Train sample num: {train_sample_num}")
         # Randomly select the samples
         indices = np.random.choice(total_train_samples, train_sample_num, replace=False)
@@ -280,7 +303,9 @@ def main():
         encoder_copy = deepcopy(target_encoder)    
 
         finetune_sparse_encoder(encoder_copy, target_classifier, mask_dict, subtrainloader, target_testloader, lr=1e-4)
-        evaluate_sparse_encoder(encoder_copy, target_classifier, mask_dict, target_testloader)
+        best_acc = evaluate_sparse_encoder(encoder_copy, target_classifier, mask_dict, target_testloader)
+        logging.info(f'Data ratio {ratio}, Data volume {train_sample_num},  NTL+LDA transfer from {source_domain} to {target_domain} dataset, the best accuracy is {best_acc}')
+
 
 if __name__ == "__main__":
     # Set the random seed for reproducible experiments

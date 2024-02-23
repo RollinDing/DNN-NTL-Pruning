@@ -17,6 +17,8 @@ def get_args():
 
     parser.add_argument('--model-name', type=str, default='moco-v1', help='model name of the ssl model')
 
+    parser.add_argument('--sparsity', default=0.95, type=float, help='the maximum sparsity of the model')
+
     ############################# required settings ################################
     parser.add_argument('data', metavar='DIR',
                         help='path to dataset')

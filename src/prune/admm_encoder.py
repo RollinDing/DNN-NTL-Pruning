@@ -320,13 +320,16 @@ class ADMMEncoderPruner:
                 loss = source_loss 
 
                 # a value consider the inner class variance of the features
-                cond_source_features = 0
+                cond_source_variance = 0
                 for i in range(10):
-                    cond_source_features += torch.sum(torch.var(source_features[source_labels == i], dim=0))
-                
+                    # if not the variance is not nan add it to the variance 
+                    if not torch.isnan(torch.var(source_features[source_labels == i], dim=0)).any():
+                        cond_source_variance += torch.sum(torch.var(source_features[source_labels == i], dim=0))
+
                 cond_target_variance = 0
                 for i in range(10):
-                    cond_target_variance += torch.sum(torch.var(target_features[target_labels == i], dim=0))
+                    if not torch.isnan(torch.var(target_features[target_labels == i], dim=0)).any():
+                        cond_target_variance += torch.sum(torch.var(target_features[target_labels == i], dim=0))
 
                 # SFDA loss 
                 if self.args.prune_method == 'admm-lda':
@@ -360,7 +363,7 @@ class ADMMEncoderPruner:
                 target_loss_sum += target_loss.item()
                 admm_loss_sum += admm_loss.item()
                 sample_num += source_input.size(0)
-                src_var += cond_source_features
+                src_var += cond_source_variance
                 tgt_var += cond_target_variance
 
             # # how many percentage parameters are adjusted 
@@ -528,7 +531,7 @@ def main():
         classifier = ResNetClassifier(model)
 
     # Initialize the ADMM pruner
-    admm_pruner = ADMMEncoderPruner(encoder, classifier, source_trainloader, target_trainloader, args, max_iterations=5000, prune_percentage=0.99)
+    admm_pruner = ADMMEncoderPruner(encoder, classifier, source_trainloader, target_trainloader, args, max_iterations=5000, prune_percentage=args.sparsity)
     admm_pruner.initialize_target_classifier()
     # Evaluate the model
     admm_pruner.evaluate(source_testloader)

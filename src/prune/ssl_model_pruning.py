@@ -134,6 +134,7 @@ def evaluate_sparse_encoder(encoder, classifier, mask_dict, testloader):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
     print(f"Evaluate Accuracy: {correct/total}")
+    return correct/total
 
 def compare_state_dicts(model_state_dict, loaded_state_dict):
     model_keys = set(model_state_dict.keys())
@@ -188,7 +189,7 @@ def main():
     model_name = args.model_name
 
     # Create the logger 
-    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}-{model_name}')
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}-{model_name}/{args.seed}/')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
@@ -292,12 +293,12 @@ def main():
     # save the pretrained resnet encoder and resnet classifier
     # Evaluate the model
     evaluate_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_testloader)    
-    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=0.95)
+    admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=args.sparsity)
     # Run the ADMM algorithm
     admm_pruner.run_admm()
 
     # Create the directory to save the model
-    model_dir = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}')
+    model_dir = os.path.join(os.path.dirname(__file__), '../..', f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}')
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
 
@@ -306,11 +307,12 @@ def main():
     #     pickle.dump(admm_pruner, f)
 
     # Save the pruned model and masks
-    torch.save(admm_pruner.encoder, f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/admm_encoder.pth')
-    torch.save(admm_pruner.source_classifier, f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/admm_source_classifier.pth')
-    torch.save(admm_pruner.mask_dict, f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/admm_mask.pth')
+    torch.save(admm_pruner.encoder, f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_encoder.pth')
+    torch.save(admm_pruner.source_classifier, f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_source_classifier.pth')
+    torch.save(admm_pruner.mask_dict, f'saved_models/{args.arch}/{model_name}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_mask.pth')
 
-    evaluate_sparse_encoder(admm_pruner.encoder, admm_pruner.source_classifier, admm_pruner.mask_dict, source_testloader)    
+    acc=evaluate_sparse_encoder(admm_pruner.encoder, admm_pruner.source_classifier, admm_pruner.mask_dict, source_testloader) 
+    logging.info(f"Source Accuracy: {acc}")   
 
 if __name__ == "__main__":
     main()

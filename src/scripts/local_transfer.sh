@@ -1,14 +1,14 @@
 #/bin/bash
 # Run ADMM
-arch='vgg11'
+arch='resnet50'
 rho=0.0025
 alpha=1
 lr=1e-3
 epochs=20
 batch_size=32
 
-source_list=('usps' 'svhn' 'syn' 'mnistm' 'cifar10' 'stl' 'mnist')
-target_list=('usps' 'svhn' 'syn' 'mnistm' 'cifar10' 'stl' 'mnist')
+source_list=('cifar10')
+target_list=('stl')
 # source_list=('imagewoof')
 # target_list=('imagenette')
 # image_size=224
