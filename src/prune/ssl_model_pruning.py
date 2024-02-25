@@ -15,6 +15,7 @@ from copy import deepcopy
 import numpy as np
 import sys
 import os
+import timm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.vgg import PrunableVGG, PrunableResNet18
@@ -26,29 +27,64 @@ from utils.args import get_args
 from utils.data import *
 import random
 
+
+class Model(nn.Module):
+    def __init__(self, feature_dim=128):
+        super(Model, self).__init__()
+
+        self.f = []
+        for name, module in torchvision.models.resnet50().named_children():
+            if name == 'conv1':
+                module = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+            if not isinstance(module, nn.Linear) and not isinstance(module, nn.MaxPool2d):
+                self.f.append(module)
+        # encoder
+        self.f = nn.Sequential(*self.f)
+        # projection head
+        self.g = nn.Sequential(nn.Linear(2048, 512, bias=False), nn.BatchNorm1d(512),
+                               nn.ReLU(inplace=True), nn.Linear(512, feature_dim, bias=True))
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+
+    def forward(self, x):
+        x = self.f(x)
+        x = self.avgpool(x)
+        feature = torch.flatten(x, start_dim=1)
+        out = self.g(feature)
+        return out
+
+
 def load_ssl_model_weights(model_name):
     """
     Load the SSL model weights into a torchvision model.
     """
-    # Define path to your SSL model weights
-    path = f'base_models/ssl_models/{model_name}.pth'
-    
-    # Load the SSL model weights
-    state_dict = torch.load(path, map_location=torch.device('cpu'))
-    if 'state_dict' in state_dict:
-        state_dict = state_dict['state_dict']
-    # Add renaming logic here if necessary, similar to your rename and remove_keys functions
-    
-    # Load a ResNet-50 model
-    model = models.resnet50(pretrained=False)
-    
-    # Replace the final layer for CIFAR10
-    num_ftrs = model.fc.in_features
-    model.fc = nn.Linear(num_ftrs, 10)  # CIFAR10 has 10 classes
-    
-    # Load the modified state dict
-    model.load_state_dict(state_dict, strict=False)
-    
+    if model_name == 'simclr':
+        path = f'base_models/resnet50-{model_name}-cifar10.pth'
+        state_dict = torch.load(path, map_location=torch.device('cpu'))
+        if 'state_dict' in state_dict:
+            state_dict = state_dict['state_dict']
+        model = Model()
+        model.load_state_dict(state_dict, strict=False)
+        # Compare the dicts
+        compare_state_dicts(model.state_dict(), state_dict)
+    else:
+        # Define path to your SSL model weights
+        path = f'base_models/ssl_models/{model_name}.pth'
+        
+        # Load the SSL model weights
+        state_dict = torch.load(path, map_location=torch.device('cpu'))
+        if 'state_dict' in state_dict:
+            state_dict = state_dict['state_dict']
+        # Add renaming logic here if necessary, similar to your rename and remove_keys functions
+        
+        # Load a ResNet-50 model
+        model = models.resnet50(pretrained=False)
+        
+        # Replace the final layer for CIFAR10
+        num_ftrs = model.fc.in_features
+        model.fc = nn.Linear(num_ftrs, 10)  # CIFAR10 has 10 classes
+        
+        # Load the modified state dict
+        model.load_state_dict(state_dict, strict=False)
     return model
 
 def load_ssl_model(args, model, device):
@@ -229,14 +265,17 @@ def main():
     if not model:
         raise ValueError("Model not found.")
     model.to(device)
-    loaded_state_dict = torch.load(f'base_models/ssl_models/{model_name}.pth', map_location='cpu')
+    if model_name == 'simclr':
 
-    # If your loaded state dict is nested under 'state_dict' key, adjust as necessary
-    if 'state_dict' in loaded_state_dict:
-        loaded_state_dict = loaded_state_dict['state_dict']
+        pass
+    else:
+        loaded_state_dict = torch.load(f'base_models/ssl_models/{model_name}.pth', map_location='cpu')
 
-    # Compare the dicts
-    compare_state_dicts(model.state_dict(), loaded_state_dict)
+        # If your loaded state dict is nested under 'state_dict' key, adjust as necessary
+        if 'state_dict' in loaded_state_dict:
+            loaded_state_dict = loaded_state_dict['state_dict']
+            # Compare the dicts
+            compare_state_dicts(model.state_dict(), loaded_state_dict)
 
     # Load the target dataset
     if target_domain == 'mnist':
@@ -259,7 +298,7 @@ def main():
         target_trainloader, target_testloader = get_imagewoof_dataloader(args, ratio=finetune_ratio)
     
     resnet_encoder = ResNetEncoder(model)
-    resnet_classifier = ResNetClassifier(model)
+    resnet_classifier = ResNetClassifier(torchvision.models.resnet50(pretrained=False), num_classes=num_classes)
     # Initialize the original mask is all ones 
     mask_dict = {}
     # initialize the mask_dict
@@ -290,10 +329,18 @@ def main():
         resnet_classifier = torch.load(ssl_model_path + '/classifier.pth')
         mask_dict = torch.load(ssl_model_path + '/mask.pth')
 
+    print(resnet_classifier)
     # save the pretrained resnet encoder and resnet classifier
     # Evaluate the model
     evaluate_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_testloader)    
     admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=args.sparsity)
+    
+    # admm_pruner.finetune_model(source_trainloader, nepochs=1, lr=1e-5)
+    
+    admm_pruner.initialize_target_classifier()
+    admm_pruner.evaluate(source_testloader, target=False)
+    admm_pruner.evaluate(target_testloader, target=True)
+    
     # Run the ADMM algorithm
     admm_pruner.run_admm()
 

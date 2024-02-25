@@ -45,12 +45,14 @@ class ResNetEncoder(nn.Module):
         return x
 
 class ResNetClassifier(nn.Module):
-    def __init__(self, original_model, num_classes=1000):
+    def __init__(self, original_model, num_classes=10):
         super(ResNetClassifier, self).__init__()
         self.num_classes = num_classes
         # The average pooling layer and fully connected layer
         self.avgpool = original_model.avgpool
-        self.classifier = original_model.fc
+        
+        # modify the output dimensions
+        self.classifier = nn.Linear(original_model.fc.in_features, num_classes)
 
     def forward(self, x):
         x = self.avgpool(x)

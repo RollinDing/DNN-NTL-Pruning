@@ -36,7 +36,7 @@ def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloa
     for epoch in range(nepochs):
         total_loss = 0.0
         count = 0
-        for inputs, labels in trainloader:
+        for n, (inputs, labels) in enumerate(trainloader):
             inputs = inputs.to(device)
             labels = labels.to(device)
             optimizer.zero_grad()
@@ -44,8 +44,8 @@ def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloa
             outputs  = classifier(features)
             loss = criterion(outputs, labels)
             loss.backward()
-            total_loss += loss.item()
-            count += len(labels)
+            total_loss = loss.item()
+            count = len(labels)
             optimizer.step()
 
             # apply the mask to the model
@@ -54,8 +54,8 @@ def finetune_sparse_encoder(encoder, classifier, mask_dict, trainloader, testloa
                     param.data = param.data * mask_dict[name]
                     # set the gradient to zero
                     param.grad = param.grad * mask_dict[name]
-
-        print(f"Epoch {epoch}: {total_loss/count}")
+            if n % 10 == 0:
+                print(f"Epoch {epoch} Batch {n}: {total_loss/count}")
 
         # # how many percentage parameters are adjusted 
         # changed = 0
@@ -128,10 +128,10 @@ def evaluate_transferability(model, target_trainloader, target_testloader):
             outputs = model(inputs)
             loss = criterion(outputs, labels)
             loss.backward()
-            total_loss += loss.item()
-            count += len(labels)
+            total_loss = loss.item()
+            count = len(labels)
             optimizer.step()
-        print(f"Epoch {epoch}: {total_loss/count}")
+            print(f"Epoch {epoch}: {total_loss/count}")
 
     # Evaluate the model using testloader
     model.eval()
@@ -228,7 +228,10 @@ def main():
 
     # evaluate_transferability_with_ratio(model, target_trainloader, target_testloader)
     resnet_encoder = ResNetEncoder(model)
-    resnet_classifier = ResNetClassifier(model)
+    if model_name == 'simclr':
+        resnet_classifier = ResNetClassifier(torchvision.models.resnet50(pretrained=False), num_classes=10)
+    else:
+        resnet_classifier = ResNetClassifier(model, num_classes=10)
 
     if args.prune_method != 'original':
         # Load the pretrained model from saved state dict
@@ -240,7 +243,7 @@ def main():
         resnet_classifier = torch.load(classifier_path)
     else:
         resnet_encoder = ResNetEncoder(model)
-        resnet_classifier = ResNetClassifier(model)
+        # resnet_classifier = ResNetClassifier(model)
         admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=50, prune_percentage=0.98)
         mask_dict = admm_pruner.mask_dict
     
@@ -263,7 +266,7 @@ def main():
     print("Evaluate the model on source domain")
     source_encoder = deepcopy(resnet_encoder)
     source_classifier = deepcopy(resnet_classifier)
-    finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
+    # finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
     best_acc = evaluate_sparse_encoder(source_encoder, source_classifier, mask_dict, source_testloader)
     logging.info(f'ADMM on {model_name}: {source_domain} to {target_domain} dataset, the SOURCE DOMAIN best accuracy is {best_acc}')
 
@@ -272,6 +275,7 @@ def main():
 
     # Evaluate the model transferability with different number of fine-tuning samples
     total_train_samples = len(target_trainloader.dataset)
+    print(total_train_samples)
 
     # Training sample number
     ratios = np.array([0.001, 0.002, 0.005, 0.008, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0])

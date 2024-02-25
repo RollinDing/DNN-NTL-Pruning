@@ -27,6 +27,18 @@ import torch
 import torch.nn.functional as F
 import random
 
+
+def cross_entropy_loss(y_hat, y):
+    # Apply softmax to get probabilities
+    probs = F.softmax(y_hat, dim=1)
+
+    # Convert class indices to one-hot encoded form
+    y_one_hot = F.one_hot(y, num_classes=probs.shape[1])
+
+    # Compute the cross-entropy loss
+    loss = -torch.sum(y_one_hot * torch.log(probs + 1e-9)) / y.size(0)  # Adding a small value to prevent log(0)
+    return loss
+
 def sfda_multiclass_regularization_loss(outputs, targets, num_classes, data_type, lambda_reg=0.01):
     """
     FDA regularization loss for multi-class classification.
@@ -130,27 +142,37 @@ class ADMMEncoderPruner:
             if param.requires_grad:
                 self.mask_dict[name] = torch.ones_like(param).to(self.device)
     
-    def evaluate(self, data_loader):
+    def evaluate(self, data_loader, target=False):
         # Evaluation the model with the mask applied
-        self.encoder.train()
+        self.encoder.eval()
+        self.target_classifier.eval()
+        self.source_classifier.eval()
+
         total = 0
         correct = 0
+        criterion = nn.CrossEntropyLoss()
         with torch.no_grad():
             for input, labels in data_loader:
                 input = input.to(self.device)
                 labels = labels.to(self.device)
                 features = self.encoder(input, self.mask_dict)
-                outputs = self.source_classifier(features)
+                if target:
+                    outputs = self.target_classifier(features)
+                else:
+                    outputs = self.source_classifier(features)
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
-        print(f'Accuracy on dataset: {correct / total}')
+                loss = criterion(outputs, labels)
+                total_loss = loss.item()
+                count = len(labels)
+        print(f'Accuracy on dataset: {correct / total}, Loss: {total_loss}')
         return correct / total
 
     def finetune_model(self, dataloader, nepochs=30, lr=1e-3, weight_decay=0.0008):
         # Fine-tuning the model on both source and target dataset
         self.encoder.train()
-
+        self.source_classifier.train()
         # Only fine-tune the unfrozen parameters
         # optimizer = torch.optim.SGD([param for name, param in self.model.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
         optimizer = torch.optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad]+
@@ -161,18 +183,24 @@ class ADMMEncoderPruner:
         for epoch in range(nepochs):
             total_loss = 0.0
             count = 0
-            for inputs, labels in dataloader:
+            correct = 0
+            total = 0
+            for n, (inputs, labels) in enumerate(dataloader):
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
                 optimizer.zero_grad()
                 features = self.encoder(inputs, self.mask_dict)
                 outputs = self.source_classifier(features)
-                loss = criterion(outputs, labels)
+                loss = cross_entropy_loss(outputs, labels)
                 loss.backward()
-                total_loss += loss.item()
-                count += len(labels)
+                total_loss = loss.item()
+                count = len(labels)
+                total += labels.size(0)
+                _, predicted = torch.max(outputs.data, 1)
+                correct += (predicted == labels).sum().item()
                 optimizer.step()
-            print(f"Epoch {epoch}: {total_loss/count}")
+                if n % 10 == 0:
+                    print(f"Epoch {epoch} Batch {n}: {total_loss}, Accuracy: {correct/total}")
 
     def model_sparsity(self):
         # Compute the sparsity of the model considering the pruning masks
@@ -232,12 +260,15 @@ class ADMMEncoderPruner:
         optimizer = optim.Adam([param for name, param in self.target_classifier.named_parameters() if param.requires_grad], lr=1e-3, weight_decay=0.0008)
         # Initialize the loss function
         criterion = nn.CrossEntropyLoss()
+        self.encoder.eval()
+        self.target_classifier.train()
 
-        best_loss = 0.0
+        best_loss = 100.0
         patience = 10
-        for epoch in range(100):
+        for epoch in range(1):
             total_loss = 0.0
-            for target_input, target_labels in self.target_loader:
+            count = 0
+            for n, (target_input, target_labels) in enumerate(self.target_loader):
                 target_input = target_input.to(self.device)
                 target_labels = target_labels.to(self.device)
                 optimizer.zero_grad()
@@ -249,7 +280,8 @@ class ADMMEncoderPruner:
 
                 target_loss.backward()
                 optimizer.step()
-                total_loss += target_loss.item()
+                total_loss = target_loss.item()
+                count = len(target_labels)
 
                 # apply the mask to the model
                 for name, param in self.encoder.named_parameters():
@@ -257,11 +289,11 @@ class ADMMEncoderPruner:
                         param.data = param.data * self.mask_dict[name]
                         # set the gradient to zero
                         param.grad = param.grad * self.mask_dict[name]
-            
-            print(f"Epoch {epoch}: {total_loss/len(self.target_loader)}")
+                if n % 10 == 0:
+                    print(f"Epoch {epoch} Batch {n}: {total_loss}")
             # Early Stop Criterion:
             # If the loss does not decrease for 10 epochs, stop the training
-            if total_loss > best_loss:
+            if total_loss/count < best_loss:
                 best_loss = total_loss
                 patience = 10
             else:
@@ -272,26 +304,36 @@ class ADMMEncoderPruner:
     def update_weights(self, Z_dict, U_dict, rho, alpha):
         # Iteratively update the model weights with ntl, on target dataset and on source dataset
         encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.lr, weight_decay=0.0008)
-        # Build an surrogate encoder to find the real target loss
-        target_optimizer = optim.Adam([param for name, param in self.target_classifier.named_parameters() if param.requires_grad], lr=1e-2, weight_decay=0.0008)
-        source_optimizer = optim.Adam([param for name, param in self.encoder.named_parameters() if param.requires_grad], lr=1e-4, weight_decay=0.0008)
-       
+
         # Initialize the loss function
         criterion = nn.CrossEntropyLoss()
 
         all_admm_loss = 0
         nepoch = 1
+        
+        self.encoder.train()
+        self.target_classifier.eval()
+        self.source_classifier.eval()
+
+        # Freeze the batchnorm 
+        # for name, module in self.encoder.named_modules():
+        #     if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+        #         module.track_running_stats = False
+
         for epoch in range(nepoch):
             # Update model weights using ADMM loss
             loss_sum = 0
+            batch_num = 0
             admm_loss_sum = 0
             source_loss_sum = 0
             target_loss_sum = 0
             sample_num = 0
             src_var = 0
             tgt_var = 0
+            sfda_loss_sum = 0
 
-            for (source_input, source_labels), (target_input, target_labels) in zip(self.source_loader, self.target_loader):
+            for n, ((source_input, source_labels), (target_input, target_labels)) in enumerate(zip(self.source_loader, self.target_loader)):
+                batch_size = source_input.size(0)
                 # make sure the source and target has the same number of samples
                 if source_input.size(0) > target_input.size(0):
                     source_input = source_input[:target_input.size(0)]
@@ -302,22 +344,37 @@ class ADMMEncoderPruner:
 
                 source_input = source_input.to(self.device)
                 source_labels = source_labels.to(self.device)
+                
                 target_input = target_input.to(self.device)
                 target_labels = target_labels.to(self.device)
 
+                
                 encoder_optimizer.zero_grad()
 
                 # The architecture-specific forward pass 
+
                 source_features = self.encoder(source_input, self.mask_dict)
-                target_features = self.encoder(target_input, self.mask_dict)
-                    
                 source_outputs = self.source_classifier(source_features)
+
+                target_features = self.encoder(target_input, self.mask_dict)
                 target_outputs = self.target_classifier(target_features)
 
-                source_loss = criterion(source_outputs, source_labels)
+
+                # normalize the features
+                source_features = F.normalize(source_features, p=2, dim=1)
+                target_features = F.normalize(target_features, p=2, dim=1)
+                
+                
+                source_loss = cross_entropy_loss(source_outputs, source_labels)
                 target_loss = criterion(target_outputs, target_labels)
 
-                loss = source_loss 
+                # print source accuracy 
+                predicted = torch.argmax(source_outputs, 1)
+                correct = (predicted == source_labels).sum().item()
+                
+                print(f"Source accuracy: {correct/source_labels.size(0)}, Loss: {source_loss.item()}")
+
+                loss = source_loss.clone()/batch_size
 
                 # a value consider the inner class variance of the features
                 cond_source_variance = 0
@@ -333,11 +390,12 @@ class ADMMEncoderPruner:
 
                 # SFDA loss 
                 if self.args.prune_method == 'admm-lda':
-                    loss -= alpha*torch.clamp(target_loss, max=10) 
-                    sfda_loss = min(100, sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=1e-1))
+                    loss -= alpha*torch.clamp(target_loss.clone()/batch_size, max=3) 
+                    sfda_loss = sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=1e0)
                     loss += sfda_loss
                 elif self.args.prune_method == 'admm-ntl':
-                    loss -= alpha*torch.clamp(target_loss, max=1) * torch.clamp(MMD_loss()(source_features.view(source_features.size(0), -1), target_features.view(target_features.size(0), -1)), max=1) 
+                    sfda_loss = 0
+                    loss -= alpha*torch.clamp(target_loss.clone()/batch_size, max=3) * torch.clamp(MMD_loss()(source_features.view(source_features.size(0), -1), target_features.view(target_features.size(0), -1)), max=1) 
                 
                 # The admm loss is the loss + rho/2 * sum((param - Z + U)^2)
                 # Compute ADMM regularization term with detached Z and U
@@ -346,10 +404,21 @@ class ADMMEncoderPruner:
 
                 # Compute the total ADMM loss
                 admm_loss = loss + rho/2 * admm_reg
+                                # Record the admm loss
+
                 admm_loss.backward()
                 encoder_optimizer.step()
                 
-                
+
+                loss_sum += loss.item()
+                source_loss_sum += source_loss.item()
+                target_loss_sum += target_loss.item()
+                admm_loss_sum += admm_loss.item()
+                batch_num += 1
+                src_var = cond_source_variance
+                tgt_var = cond_target_variance
+                sfda_loss_sum += sfda_loss.item()
+                                
                 # apply the mask to the model
                 for name, param in self.encoder.named_parameters():
                     if name in self.mask_dict:
@@ -357,30 +426,23 @@ class ADMMEncoderPruner:
                         # set the gradient to zero
                         param.grad = param.grad * self.mask_dict[name]
 
-                # Record the admm loss
-                loss_sum += loss.item()
-                source_loss_sum += source_loss.item()
-                target_loss_sum += target_loss.item()
-                admm_loss_sum += admm_loss.item()
-                sample_num += source_input.size(0)
-                src_var += cond_source_variance
-                tgt_var += cond_target_variance
+                # # how many percentage parameters are adjusted 
+                # changed = 0
+                # total = 0
+                # for name, param in self.encoder.named_parameters():
+                #     if param.requires_grad:
+                #         changed += torch.sum(param.grad != 0).item()
+                #         total += param.numel()
+                # print(f"Percentage of changed parameters: {changed/total}")
 
-            # # how many percentage parameters are adjusted 
-            # changed = 0
-            # total = 0
-            # for name, param in self.encoder.named_parameters():
-            #     if param.requires_grad:
-            #         changed += torch.sum(param.grad != 0).item()
-            #         total += param.numel()
-            # print(f"Percentage of changed parameters: {changed/total}")
-
-            # Print the admm loss set in 2 demical values
-            logging.info(f'Epoch {epoch}: admm loss: {admm_loss_sum / sample_num:.4f}; task loss: {loss_sum / sample_num:.4f}; source loss: {source_loss_sum / sample_num:.4f}; target loss: {target_loss_sum / sample_num:.4f}; source variance: {src_var/sample_num:.4f}; target variance: {tgt_var/sample_num:.4f};')
-            all_admm_loss += admm_loss
-            # logging.info(f"Epoch {epoch}: Source loss: {source_loss.item()}")
-            # logging.info(f"Epoch {epoch}: Target loss: {target_loss.item()}")
-        return all_admm_loss / nepoch
+                # Print the admm loss set in 2 demical values
+                if n % 1 == 0:
+                    logging.info(f'Epoch {epoch} Batch {n}: admm loss: {admm_loss.item() :.4f}; task loss: {loss.item():.4f}; source loss: {source_loss.item() :.4f}; \n \
+                            \t target loss: {target_loss.item():.4f}; source variance: {src_var:.4f}; target variance: {tgt_var:.4f}; SFDA loss: {sfda_loss:.4f}')
+                all_admm_loss = admm_loss.item()
+                # logging.info(f"Epoch {epoch}: Source loss: {source_loss.item()}")
+                # logging.info(f"Epoch {epoch}: Target loss: {target_loss.item()}")
+        return all_admm_loss
     
 
     def admm_loss(self, device, model, Z, U, rho, output, target, criterion):
@@ -402,8 +464,12 @@ class ADMMEncoderPruner:
         
         # Run the ADMM iterations
         # Set model to train mode
-        self.encoder.train()
+
         for iteration in range(self.max_iterations):
+
+            source_perf = self.evaluate(self.source_loader, target=False)
+            target_perf = self.evaluate(self.target_loader, target=True)
+
             admm_loss = self.update_weights(Z_dict, U_dict, rho, alpha)
             # Update the Z variables
             l1_alpha = 1e-4
@@ -413,9 +479,14 @@ class ADMMEncoderPruner:
             U_dict = self.update_U(U_dict, Z_dict)
             # Update the masks
             self.mask_dict = self.update_masks(Z_dict)
+            
             # Evaluate the model
-            source_perf = self.evaluate(self.source_loader)
-            target_perf = self.evaluate(self.target_loader)
+            self.encoder.eval()
+            self.target_classifier.eval()
+            self.source_classifier.eval()
+            source_perf = self.evaluate(self.source_loader, target=False)
+            target_perf = self.evaluate(self.target_loader, target=True)
+
             logging.info(f'Iteration {iteration}: source perf: {source_perf}, target perf: {target_perf}, model sparsity: {self.model_sparsity()}')
             # Check the model sparsity for each epoch as stop criterion
             sparsity = self.model_sparsity()
@@ -532,10 +603,13 @@ def main():
 
     # Initialize the ADMM pruner
     admm_pruner = ADMMEncoderPruner(encoder, classifier, source_trainloader, target_trainloader, args, max_iterations=5000, prune_percentage=args.sparsity)
-    admm_pruner.initialize_target_classifier()
     # Evaluate the model
-    admm_pruner.evaluate(source_testloader)
-    admm_pruner.evaluate(target_testloader)
+    admm_pruner.evaluate(source_testloader, target=False)
+    admm_pruner.evaluate(target_testloader, target=True)
+
+    # Finetune the model
+    admm_pruner.initialize_target_classifier()
+
 
     # Run the ADMM algorithm
     admm_pruner.run_admm()
