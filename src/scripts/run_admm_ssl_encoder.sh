@@ -4,16 +4,16 @@
 arch='resnet50'
 source='cifar10'
 target='stl'
-rho=1
-alpha=1.0
+rho=0.005
+alpha=1
 lr=1e-3
 epochs=20
 finetune_ratio=0.1
 prune_method='admm-lda'
 model_name_list=('simclr')
 # model_name_list=('moco-v2' 'deepcluster-v2' 'byol' 'infomin' 'moco-v1' 'swav' 'insdis' 'pcl-v1' 'pcl-v2')
-seeds=(3 4 5)
-batch_size=256
+seeds=(1 2 3 4 5)
+batch_size=128
 image_size=32
 sparsity=0.95
 

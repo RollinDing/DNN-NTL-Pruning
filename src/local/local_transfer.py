@@ -78,6 +78,11 @@ def local_transfer(model, source_trainloader, source_testloader):
 def main():
     # load args 
     args = get_args()
+    seed = args.seed
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+
     num_classes = 10
     if args.arch == 'vgg11':
         # Load the pretrained model 
@@ -104,7 +109,7 @@ def main():
     finetune_ratio = args.finetune_ratio
 
     # Create the logger 
-    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/transfer')
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/transfer/{args.seed}')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 

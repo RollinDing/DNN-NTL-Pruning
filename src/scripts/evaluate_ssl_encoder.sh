@@ -3,18 +3,18 @@
 arch='resnet50'
 source='cifar10'
 target='stl'
-rho=0.01
+rho=0.1
 alpha=0.001
 lr=1e-3
 epochs=10
 finetune_ratio=1.0
 model_name_list=('simclr')
 # model_name_list=('moco-v2' 'deepcluster-v2' 'byol' 'infomin' 'moco-v1' 'swav' 'insdis' 'pcl-v1' 'pcl-v2')
-seeds=(1)
+seeds=(1 2 3 4 5)
 batch_size=32
 image_size=32
 sparsity=0.99
-prune_method='original'
+prune_method='admm-lda'
 
 
 for seed in "${seeds[@]}"; do

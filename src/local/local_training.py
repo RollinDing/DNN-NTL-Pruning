@@ -79,6 +79,11 @@ def local_train(model, source_trainloader, source_testloader):
 def main():
     # load args 
     args = get_args()
+    seed = args.seed
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+
     num_classes = 10
     if args.arch == 'vgg11':
         # Load the pretrained model 
@@ -104,7 +109,7 @@ def main():
     finetune_ratio = args.finetune_ratio
 
     # Create the logger 
-    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/local')
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/local/{args.seed}')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 

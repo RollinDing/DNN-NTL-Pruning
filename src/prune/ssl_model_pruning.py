@@ -335,7 +335,7 @@ def main():
     evaluate_sparse_encoder(resnet_encoder, resnet_classifier, mask_dict, source_testloader)    
     admm_pruner = ADMMEncoderPruner(resnet_encoder, resnet_classifier, source_trainloader, target_trainloader, args, max_iterations=200, prune_percentage=args.sparsity)
     
-    # admm_pruner.finetune_model(source_trainloader, nepochs=1, lr=1e-5)
+    admm_pruner.finetune_model(source_trainloader, nepochs=10, lr=1e-4)
     
     admm_pruner.initialize_target_classifier()
     admm_pruner.evaluate(source_testloader, target=False)

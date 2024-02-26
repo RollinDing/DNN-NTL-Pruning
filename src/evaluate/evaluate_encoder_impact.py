@@ -150,9 +150,10 @@ def main():
     # load args 
     args = get_args()
     # Set random seed 
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
-    np.random.seed(args.seed)
+    seed = 2024
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
     
     num_classes = 10
     if args.arch == 'vgg11':
@@ -180,15 +181,15 @@ def main():
 
     # Create the logger 
     if args.prune_method == 'admm-ntl':
-        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/ntl/{args.seed}')
+        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/ntl/{args.seed}/{args.sparsity}')
     elif args.prune_method == 'admm-lda':
-        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/lda/{args.seed}')
+        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/lda/{args.seed}/{args.sparsity}')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     
     log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}.log')
     # The log file should clear every time
-    logging.basicConfig(filename=log_path, filemode='w', level=logging.INFO)
+    logging.basicConfig(filename=log_path, filemode='a', level=logging.INFO)
     # Log the time 
     logging.info(time.asctime(time.localtime(time.time())))
     # Log the args
@@ -247,9 +248,9 @@ def main():
         resnet_classifier = ResNetClassifier(model)
 
     # Load the pretrained model from saved state dict
-    encoder_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_encoder.pth'
-    classifier_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_source_classifier.pth'
-    mask_path  = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/admm_mask.pth'
+    encoder_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/admm_encoder.pth'
+    classifier_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/admm_source_classifier.pth'
+    mask_path  = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/admm_mask.pth'
     
     # admm_pickle_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl'
 
@@ -273,7 +274,7 @@ def main():
     print("Evaluate the model on source domain")
     source_encoder = deepcopy(resnet_encoder)
     source_classifier = deepcopy(resnet_classifier)
-    finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
+    # finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
     best_acc = evaluate_sparse_encoder(source_encoder, source_classifier, mask_dict, source_testloader)
     logging.info(f'ADMM: {source_domain} to {target_domain} dataset, the SOURCE DOMAIN best accuracy is {best_acc}')
 

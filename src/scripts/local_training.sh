@@ -1,8 +1,8 @@
 #/bin/bash
 
 # Run ADMM
-arch='resnet50'
-source='imagenette'
+arch='vgg11'
+source='cifar10'
 
 rho=0.0025
 alpha=1
