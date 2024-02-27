@@ -26,6 +26,7 @@ from utils.data import *
 import torch
 import torch.nn.functional as F
 import random
+from evaluate.evaluate_encoder_impact import evaluate_sparse_encoder
 
 
 def cross_entropy_loss(y_hat, y):
@@ -597,14 +598,15 @@ def main():
         encoder = ResNetEncoder(model)
         classifier = ResNetClassifier(model)
 
+
     # Initialize the ADMM pruner
     admm_pruner = ADMMEncoderPruner(encoder, classifier, source_trainloader, target_trainloader, args, max_iterations=5000, prune_percentage=args.sparsity)
-    # Evaluate the model
-    admm_pruner.evaluate(source_testloader, target=False)
-    admm_pruner.evaluate(target_testloader, target=True)
 
     # Finetune the model
     admm_pruner.initialize_target_classifier()
+    # Evaluate the model
+    admm_pruner.evaluate(source_testloader, target=False)
+    admm_pruner.evaluate(target_testloader, target=True)
 
 
     # Run the ADMM algorithm

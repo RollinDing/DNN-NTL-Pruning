@@ -51,8 +51,11 @@ class ResNetClassifier(nn.Module):
         # The average pooling layer and fully connected layer
         self.avgpool = original_model.avgpool
         
-        # modify the output dimensions
-        self.classifier = nn.Linear(original_model.fc.in_features, num_classes)
+        # modify the output dimensions if the model has a different number of classes
+        if original_model.fc.out_features != num_classes:
+            self.classifier = nn.Linear(original_model.fc.in_features, num_classes)
+        else:
+            self.classifier = original_model.fc
 
     def forward(self, x):
         x = self.avgpool(x)

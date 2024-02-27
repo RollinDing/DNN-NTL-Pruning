@@ -3,7 +3,7 @@
 # Evaluate  ADMM using a for loop when source and target are different
 source='cifar10'
 target='stl'
-arch='vgg11'
+arch='resnet18'
 rho=0.1
 alpha=1
 lr=1e-3
