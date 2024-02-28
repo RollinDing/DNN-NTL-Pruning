@@ -8,13 +8,12 @@ alpha=0.001
 lr=1e-3
 epochs=10
 finetune_ratio=1.0
-model_name_list=('supervised')
-# model_name_list=('moco-v2' 'deepcluster-v2' 'byol' 'infomin' 'moco-v1' 'swav' 'insdis' 'pcl-v1' 'pcl-v2')
+model_name_list=('moco-v2' 'moco-v1' 'simclr')
 seeds=(1 2 3 4 5)
 batch_size=256
 image_size=32
 sparsity=0.95
-prune_method='admm-lda'
+prune_method='original'
 
 
 for seed in "${seeds[@]}"; do

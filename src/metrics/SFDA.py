@@ -87,6 +87,7 @@ class SFDA():
         if self.shrinkage is None:
             # adaptive regularization strength
             largest_evals_w = iterative_A(Sw, max_iterations=3)
+            print(largest_evals_w)
             shrinkage = max(np.exp(-5 * largest_evals_w), 1e-10)
             self.shrinkage = shrinkage
         else:
@@ -154,7 +155,7 @@ def SFDA_Score(X, y):
     n = len(y)
     num_classes = len(np.unique(y))
     
-    SFDA_first = SFDA()
+    SFDA_first = SFDA(shrinkage=1e-2)
     prob = SFDA_first.fit(X, y).predict_proba(X)  # p(y|x)
     
     # soften the probability using softmax for meaningful confidential mixture

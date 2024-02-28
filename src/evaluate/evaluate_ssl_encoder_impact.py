@@ -150,6 +150,15 @@ def evaluate_transferability(model, target_trainloader, target_testloader):
 def main():
     # load args 
     args = get_args()
+
+        # load args 
+    args = get_args()
+    # Set random seed 
+    seed = args.seed
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+    
     num_classes = 10
     if args.arch == 'vgg11':
         # Load the pretrained model 
@@ -183,7 +192,7 @@ def main():
 
     log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}.log')
     # The log file should clear every time
-    logging.basicConfig(filename=log_path, filemode='w', level=logging.INFO)
+    logging.basicConfig(filename=log_path, filemode='a', level=logging.INFO)
     # Log the time 
     logging.info(time.asctime(time.localtime(time.time())))
     # Log the args
@@ -313,6 +322,4 @@ def main():
 
 if __name__ == "__main__":
     # Set the random seed for reproducible experiments
-    torch.manual_seed(1)
-    np.random.seed(1)
     main()

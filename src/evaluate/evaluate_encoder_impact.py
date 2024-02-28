@@ -150,7 +150,7 @@ def main():
     # load args 
     args = get_args()
     # Set random seed 
-    seed = 2024
+    seed = args.seed
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     np.random.seed(seed)
@@ -274,7 +274,7 @@ def main():
     print("Evaluate the model on source domain")
     source_encoder = deepcopy(resnet_encoder)
     source_classifier = deepcopy(resnet_classifier)
-    # finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
+    finetune_sparse_encoder(source_encoder, source_classifier, mask_dict, source_trainloader, source_testloader, lr=1e-4)
     best_acc = evaluate_sparse_encoder(source_encoder, source_classifier, mask_dict, source_testloader)
     logging.info(f'ADMM: {source_domain} to {target_domain} dataset, the SOURCE DOMAIN best accuracy is {best_acc}')
 
