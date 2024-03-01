@@ -2,8 +2,8 @@
 
 # Run ADMM
 arch='resnet18'
-source='imagewoof'
-target='imagenette'
+source='imagenette'
+target='imagewoof'
 rho=0.005
 alpha=0.1
 lr=1e-3

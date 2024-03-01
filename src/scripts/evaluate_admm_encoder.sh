@@ -12,8 +12,9 @@ prune_method='admm-lda'
 image_size=224
 batch_size=256
 seeds=(1 2 3 4 5)
+sparsity=0.8
 
 for seed in "${seeds[@]}"; do
-    python src/evaluate/evaluate_encoder_impact.py data/ --arch=${arch} --source=${source} --target=${target} --image-size=${image_size}\
-        --rho=${rho} --alpha=${alpha} --lr=${lr} --finetune-ratio=${finetune_ratio} --epochs=${epochs}  --prune-method=${prune_method} --seed=${seed}
+    python src/evaluate/evaluate_encoder_impact.py data/ --arch=${arch} --source=${source} --target=${target} --image-size=${image_size} \
+        --rho=${rho} --alpha=${alpha} --lr=${lr} --finetune-ratio=${finetune_ratio} --epochs=${epochs}  --prune-method=${prune_method} --seed=${seed} --sparsity=${sparsity}
 done
