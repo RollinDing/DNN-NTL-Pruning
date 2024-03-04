@@ -27,7 +27,9 @@ def finetune_model(model, trainloader, testloader, nepochs=30, lr=0.001):
 
     # fine-tune the encoder and classifier
     # optimizer = torch.optim.SGD([param for name, param in encoder.named_parameters() if param.requires_grad] + [param for name, param in classifier.named_parameters() if param.requires_grad], lr=lr, momentum=0.9)
-    optimizer = torch.optim.Adam([param for name, param in model.named_parameters() if param.requires_grad], lr=lr, weight_decay=0.0008)
+    # optimizer = torch.optim.Adam([param for name, param in model.named_parameters() if param.requires_grad], lr=lr, weight_decay=0.0008)
+    # only finetune the linear classifier in vgg
+    optimizer = torch.optim.Adam([param for name, param in model.classifier.named_parameters() if param.requires_grad], lr=lr, weight_decay=0.0008)
     criterion = torch.nn.CrossEntropyLoss()
 
     model.train()
@@ -110,7 +112,7 @@ def main():
     random.seed(seed)
 
     # Create the logger 
-    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/ntl/{seed}')
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/ntl/probe-{args.lr}/{seed}')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     
@@ -157,17 +159,18 @@ def main():
         target_trainloader, target_testloader = get_stl_dataloader(args, ratio=1)
 
     # Evaluate the model
-    print("Evaluate the model on source domain")
-    model_copy = deepcopy(model)
-    finetune_model(model_copy, source_trainloader, source_testloader, lr=1e-4)
-    best_acc = evaluate_model(model_copy, source_testloader)
-    logging.info(f'NTL: {source_domain} to {target_domain} dataset, the SOURCE DOMAIN best accuracy is {best_acc}')
+    # print("Evaluate the model on source domain")
+    # model_copy = deepcopy(model)
+    # finetune_model(model_copy, source_trainloader, source_testloader, lr=1e-4)
+    # best_acc = evaluate_model(model_copy, source_testloader)
+    # logging.info(f'NTL: {source_domain} to {target_domain} dataset, the SOURCE DOMAIN best accuracy is {best_acc}')
 
     # Evaluate the model transferability with different number of fine-tuning samples
     total_train_samples = len(target_trainloader.dataset)
 
     # Training sample number
-    ratios = np.array([0.001, 0.002, 0.005, 0.008, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0])
+    # ratios = np.array([0.001, 0.002, 0.005, 0.008, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0])
+    ratios=np.array([0.1])
     train_sample_nums = [int(total_train_samples*ratio) for ratio in ratios]
 
     for train_sample_num, ratio in zip(train_sample_nums, ratios):
@@ -179,7 +182,7 @@ def main():
         # Evaluate the transferability 
         model_copy = deepcopy(model)
 
-        finetune_model(model_copy, subtrainloader, target_testloader, lr=1e-4)
+        finetune_model(model_copy, subtrainloader, target_testloader, lr=args.lr)
         best_acc = evaluate_model(model_copy, target_testloader)
         logging.info(f'Data ratio {ratio}, Data volume {train_sample_num},  CUTI transfer from {source_domain} to {target_domain} dataset, the best accuracy is {best_acc}')
 

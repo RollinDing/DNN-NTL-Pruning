@@ -306,7 +306,7 @@ class ADMMEncoderPruner:
         criterion = nn.CrossEntropyLoss()
 
         all_admm_loss = 0
-        nepoch = 1
+        nepoch = self.nepochs
         
         self.encoder.train()
         self.target_classifier.eval()
@@ -530,7 +530,7 @@ def main():
     finetune_ratio = args.finetune_ratio
 
     # Create the logger 
-    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/{args.prune_method}/{args.seed}/{args.sparsity}')
+    log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/{args.prune_method}/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}/')
     print("Creating log directory: ", log_dir)
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
@@ -617,7 +617,7 @@ def main():
     admm_pruner.evaluate(target_testloader, target=True)
 
     # Create the directory to save the model
-    model_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/'
+    model_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}/'
     model_dir = os.path.join(os.path.dirname(__file__), '../..', model_path)
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)

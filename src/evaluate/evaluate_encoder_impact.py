@@ -181,9 +181,9 @@ def main():
 
     # Create the logger 
     if args.prune_method == 'admm-ntl':
-        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/ntl/{args.seed}/{args.sparsity}')
+        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/ntl/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}')
     elif args.prune_method == 'admm-lda':
-        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/lda/{args.seed}/{args.sparsity}')
+        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/lda/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     
@@ -199,23 +199,23 @@ def main():
 
     # Load the dataset
     if source_domain == 'mnist':
-        source_trainloader, source_testloader = get_mnist_dataloader(args, ratio=finetune_ratio)
+        source_trainloader, source_testloader = get_mnist_dataloader(args, ratio=1)
     elif source_domain == 'cifar10':
-        source_trainloader, source_testloader = get_cifar_dataloader(args, ratio=finetune_ratio)
+        source_trainloader, source_testloader = get_cifar_dataloader(args, ratio=1)
     elif source_domain == 'usps':
-        source_trainloader, source_testloader = get_usps_dataloader(args, ratio=finetune_ratio)
+        source_trainloader, source_testloader = get_usps_dataloader(args, ratio=1)
     elif source_domain == 'svhn':
-        source_trainloader, source_testloader = get_svhn_dataloader(args, ratio=finetune_ratio)
+        source_trainloader, source_testloader = get_svhn_dataloader(args, ratio=1)
     elif source_domain == 'mnistm':
-        source_trainloader, source_testloader = get_mnistm_dataloader(args, ratio=finetune_ratio)
+        source_trainloader, source_testloader = get_mnistm_dataloader(args, ratio=1)
     elif source_domain == 'syn':
-        source_trainloader, source_testloader = get_syn_dataloader(args, ratio=finetune_ratio)
+        source_trainloader, source_testloader = get_syn_dataloader(args, ratio=1)
     elif source_domain == 'stl':
-        source_trainloader, source_testloader = get_stl_dataloader(args, ratio=finetune_ratio)
+        source_trainloader, source_testloader = get_stl_dataloader(args, ratio=1)
     elif source_domain == 'imagenette':
-        source_trainloader, source_testloader = get_imagenette_dataloader(args, ratio=finetune_ratio)
+        source_trainloader, source_testloader = get_imagenette_dataloader(args, ratio=1)
     elif source_domain == 'imagewoof':
-        source_trainloader, source_testloader = get_imagewoof_dataloader(args, ratio=finetune_ratio)
+        source_trainloader, source_testloader = get_imagewoof_dataloader(args, ratio=1)
 
     model = load_base_model(model, args.arch, source_domain, source_trainloader, source_testloader)
     
@@ -248,9 +248,9 @@ def main():
         resnet_classifier = ResNetClassifier(model)
 
     # Load the pretrained model from saved state dict
-    encoder_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/admm_encoder.pth'
-    classifier_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/admm_source_classifier.pth'
-    mask_path  = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/admm_mask.pth'
+    encoder_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}/admm_encoder.pth'
+    classifier_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}/admm_source_classifier.pth'
+    mask_path  = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}/admm_mask.pth'
     
     # admm_pickle_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl'
 
