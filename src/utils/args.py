@@ -36,6 +36,7 @@ def get_args():
     parser.add_argument('--finetune-ratio', default=0.1, type=float, help='finetune ratio')
     parser.add_argument('--rho', default=1e-2, type=float, help='rho of admm')
     parser.add_argument('--alpha', default=1e-3, type=float, help='alpha of admm')
+    parser.add_argument('--reg', default=1e3, type=float, help='beta of second regularization term')
     parser.add_argument('--epochs', default=10, type=int, metavar='N',
                         help='number of total epochs to run')
     parser.add_argument('-b', '--batch-size', default=256, type=int,

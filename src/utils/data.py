@@ -5,7 +5,6 @@ from torch.utils.data import Subset
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
 import numpy as np
-
 from .mnistm import MNISTM
 from .syn import SyntheticDigits
 
@@ -565,9 +564,8 @@ def get_imagewoof_dataloader(args, ratio=0.1):
     return train_loader, test_loader
 
 if __name__ == "__main__":
-    pass
-    # args = get_args()
-    # train_loader, val_loader = get_imagenette_dataloader(args)
+    args = get_args()
+    train_loader, val_loader = get_svhn_dataloader(args)
     # train_loader, val_loader = get_imagewoof_dataloader(args)
     # for i, (input, target) in enumerate(train_loader):
     #     print(input.shape, target.shape)

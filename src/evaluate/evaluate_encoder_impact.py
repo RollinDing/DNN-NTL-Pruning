@@ -181,9 +181,9 @@ def main():
 
     # Create the logger 
     if args.prune_method == 'admm-ntl':
-        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/ntl/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}')
+        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/ntl/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}-{args.alpha}-{args.reg}')
     elif args.prune_method == 'admm-lda':
-        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/lda/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}')
+        log_dir = os.path.join(os.path.dirname(__file__), '../..', f'logs/{args.arch}/lda/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}-{args.alpha}-{args.reg}')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     
@@ -248,9 +248,9 @@ def main():
         resnet_classifier = ResNetClassifier(model)
 
     # Load the pretrained model from saved state dict
-    encoder_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}/admm_encoder.pth'
-    classifier_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}/admm_source_classifier.pth'
-    mask_path  = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}/admm_mask.pth'
+    encoder_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.alpha}-{args.reg}/admm_encoder.pth'
+    classifier_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.alpha}-{args.reg}/admm_source_classifier.pth'
+    mask_path  = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.alpha}-{args.reg}/admm_mask.pth'
     
     # admm_pickle_path = f'saved_models/{args.arch}/{source_domain}_to_{target_domain}/admm_pruner.pkl'
 

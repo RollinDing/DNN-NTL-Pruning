@@ -298,7 +298,7 @@ class ADMMEncoderPruner:
                 if patience == 0:
                     break
 
-    def update_weights(self, Z_dict, U_dict, rho, alpha):
+    def update_weights(self, Z_dict, U_dict, rho, alpha, lambda_reg=1e3):
         # Iteratively update the model weights with ntl, on target dataset and on source dataset
         encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.lr, weight_decay=0.0008)
 
@@ -388,8 +388,8 @@ class ADMMEncoderPruner:
                 # SFDA loss 
                 if self.args.prune_method == 'admm-lda':
                     loss -= alpha*torch.clamp(target_loss, max=10) 
-                    loss += sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=1e3)
-                    sfda_loss=sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=1e3)
+                    loss += sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=lambda_reg)
+                    sfda_loss=sfda_multiclass_regularization_loss(target_features, target_labels, 10, 'target', lambda_reg=lambda_reg)
                 elif self.args.prune_method == 'admm-ntl':
                     sfda_loss = 0
                     loss -= alpha*torch.clamp(target_loss.clone(), max=3) * torch.clamp(MMD_loss()(source_features.view(source_features.size(0), -1), target_features.view(target_features.size(0), -1)), max=1) 
@@ -456,6 +456,7 @@ class ADMMEncoderPruner:
         # Initialize the rho
         rho = self.args.rho
         alpha = self.args.alpha
+        lambda_reg = self.args.reg
         # Initialize the Z and U variables
         Z_dict, U_dict = self.initialize_Z_and_U()
         
@@ -467,7 +468,7 @@ class ADMMEncoderPruner:
             source_perf = self.evaluate(self.source_loader, target=False)
             target_perf = self.evaluate(self.target_loader, target=True)
 
-            admm_loss = self.update_weights(Z_dict, U_dict, rho, alpha)
+            admm_loss = self.update_weights(Z_dict, U_dict, rho, alpha, lambda_reg)
             # Update the Z variables
             l1_alpha = 1e-4
             Z_dict = self.update_Z_l1(U_dict, l1_alpha, rho)
@@ -535,7 +536,7 @@ def main():
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
-    log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}.log')
+    log_path = os.path.join(log_dir, f'admm_{source_domain}_to_{target_domain}-{args.alpha}-{args.reg}.log')
     # The log file should clear every time
     logging.basicConfig(filename=log_path, filemode='w', level=logging.INFO)
     # Log the time 
@@ -600,7 +601,7 @@ def main():
 
 
     # Initialize the ADMM pruner
-    admm_pruner = ADMMEncoderPruner(encoder, classifier, source_trainloader, target_trainloader, args, max_iterations=5000, prune_percentage=args.sparsity)
+    admm_pruner = ADMMEncoderPruner(encoder, classifier, source_trainloader, target_trainloader, args, max_iterations=100, prune_percentage=args.sparsity)
 
     # Finetune the model
     admm_pruner.initialize_target_classifier()
@@ -617,7 +618,7 @@ def main():
     admm_pruner.evaluate(target_testloader, target=True)
 
     # Create the directory to save the model
-    model_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.finetune_ratio}/'
+    model_path = f'saved_models/{args.arch}/{args.prune_method}/{source_domain}_to_{target_domain}/{args.seed}/{args.sparsity}/finetune-{args.alpha}-{args.reg}/'
     model_dir = os.path.join(os.path.dirname(__file__), '../..', model_path)
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
