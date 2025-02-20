@@ -11,3 +11,5 @@ To build non-transferable model using model pruning with ADMM
 
 - Run admm pruning: run `bash scripts/run_admm_encoder.sh`
 - Evaluate the non-transferability of pruned model: run `bash scripts/evaluate_admm_encoder.sh`
+
+- More detailed instructions is coming soon...
